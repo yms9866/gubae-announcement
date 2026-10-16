@@ -83,3 +83,11 @@ npm start
 ```
 
 For local development, load variables from a private environment file or use Node's `--env-file` flag. Runtime credentials are never required by the test suite. Tests cover access boundaries, report-day restrictions, link replacement/revocation, revision conflicts, teacher validation, imports, monthly calculations and all main frontend screens through DOM unit tests. Live Firebase / Render and browser QA must be checked after connecting and deploying those services.
+
+## Monthly programs and teacher imports
+
+Use **Teachers → Import teachers** to upload CSV or paste name/phone columns from a spreadsheet. Preview validates international numbers, skips duplicate contacts, and blocks conflicting numbers for the same name. Cloud imports use the existing authenticated teacher API.
+
+Use **Load a new month** beside the monthly-program selector. Download a template containing the current program’s mahber names, fill in each new date and Zoom link, then preview and save. CSV headers are `topic,date,startTime,durationMinutes,link,poster`; only topic/date/link are required. Dates are Gregorian ISO (`YYYY-MM-DD`), times are Dubai 24-hour time (default 21:00), and duration defaults to 90 minutes. A program may span its starting month and the following month; the label can use an Ethiopian month name. Optional poster URLs must be full HTTPS image URLs. Old dated posters and sent confirmations are not reused. Custom attached image files remain on the attaching device.
+
+Signed-in programs are created atomically in Firestore with separate meeting IDs. An optional checkbox reuses recipient numbers and assigned teachers only for matching mahber names. Teacher contacts are shared across programs. Switch programs to review earlier announcements or reports. Monthly report screens follow the selected program; **Full program** includes its entire date range. Re-importing an existing program month is rejected to protect history; select the program and edit individual meetings instead. New dates do not automatically update Zoom or previously created Google Calendar events.

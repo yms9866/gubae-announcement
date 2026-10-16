@@ -5,7 +5,8 @@ import {createApp} from '../app.mjs';
 import {ConflictError} from '../store.mjs';
 import {monthlyReport,dateRange,validateReport,reportCsv} from '../../dist/reporting.mjs';
 class MemoryStore{
- constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),report_links:new Map()};this.v=1}
+ constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),programs:new Map(),report_links:new Map()};this.v=1}
+ async createProgram(program,meetings){if(this.data.programs.has(program.id))throw new ConflictError();for(const m of meetings)this.data.meetings.set(m.id,{...m,revision:1});this.data.programs.set(program.id,program);this.v++;return program;}
  async get(c,id){return structuredClone(this.data[c].get(id)||null)}
  async list(c){return structuredClone([...this.data[c].values()])}
  async version(){return this.v}
@@ -26,3 +27,16 @@ test('legacy import fills missing data, preserves cloud changes, and is repeatab
 test('monthly reports cover custom ranges, updated records once, missing and upcoming separately',async()=>{const{api}=setup();const saved=await admin(api.put('/api/meetings/1/report')).send(report);await admin(api.put('/api/meetings/1/report')).send({...report,revision:saved.body.revision,participants:40});const r=await admin(api.get('/api/monthly-report?month=2026-10'));assert.equal(r.status,200);assert.equal(r.body.summary.totalParticipants,40);assert.equal(r.body.summary.submitted,1);assert.equal(r.body.summary.upcoming,1);assert.equal(r.body.summary.missing,0);assert.equal(r.body.summary.averageTeachingRating,4);assert.equal((await admin(api.get('/api/monthly-report?month=invalid'))).status,400);const csv=await admin(api.get('/api/monthly-report?month=2026-10&format=csv'));assert.match(csv.headers['content-type'],/text\/csv/)});
 test('report validation rejects incomplete counts; aggregates exclude cancellations and missing data',()=>{assert.throws(()=>validateReport({...report,participants:''}));assert.throws(()=>validateReport({...report,participants:-1}));assert.throws(()=>validateReport({...report,teachingRating:6}));assert.equal(validateReport({...report,status:'cancelled',participants:'',teachingRating:''}).teachingRating,null);const result=monthlyReport([meeting('1','2026-10-15'),meeting('2','2026-10-16'),meeting('3','2026-10-17')],[{...report,meetingId:'1'},{...report,meetingId:'2',status:'cancelled',participants:0,teachingRating:null}],{month:'2026-10'},'2026-10-17');assert.equal(result.summary.totalParticipants,35);assert.equal(result.summary.averageParticipants,35);assert.equal(result.summary.averageTeachingRating,4);assert.equal(result.summary.missing,1);assert.deepEqual(dateRange({month:'2028-02'}),{from:'2028-02-01',to:'2028-02-29'});assert.match(reportCsv({...result,rows:[{...result.rows[0],topic:'=SUM(1,1)'}]}),/"'=SUM/)});
 test('unexpected database failures return safe server error',async()=>{const{api,store}=setup();store.version=async()=>{throw Error('secret database internals')};const r=await admin(api.get('/api/state'));assert.equal(r.status,500);assert(!r.body.error.includes('secret'))});
+
+test('new monthly programs preserve history, reset statuses, reuse contacts only by choice, and reject repeat imports',async()=>{
+ const {api,store}=setup();store.data.meetings.get('2').topic='Another mahber';store.data.meetings.get('1').sent={poster:'2026-10-12'};store.data.meetings.get('1').teacherId='teacher-one';store.data.reports.set('1',{...report,id:'1',meetingId:'1'});
+ const old=structuredClone(store.data.meetings.get('1'));const input={month:'2026-11',label:'ኅዳር 2019',carryContacts:true,meetings:[{topic:old.topic,date:'2026-11-15',link:old.link}]};
+ assert.equal((await api.post('/api/programs').send(input)).status,401);
+ assert.equal((await admin(api.post('/api/programs')).send({...input,meetings:[...input.meetings,{topic:'Bad',date:'2026-11-16',link:'https://evil.example/j/12345678901'}]})).status,400);assert.equal(store.data.meetings.size,2);
+ assert.equal((await admin(api.post('/api/programs')).send(input)).status,201);
+ const next=store.data.meetings.get('2026-11-1');assert.deepEqual(next.sent,{});assert.equal(next.recipient,old.recipient);assert.equal(next.teacherId,'teacher-one');assert.equal(next.poster,'');assert.deepEqual(store.data.meetings.get('1'),old);assert(store.data.reports.has('1'));
+ assert.equal((await admin(api.post('/api/programs')).send(input)).status,409);
+ assert.equal((await admin(api.post('/api/programs')).send({...input,month:'2026-12',carryContacts:false,meetings:[{...input.meetings[0],date:'2026-12-15'}]})).status,201);assert.equal(store.data.meetings.get('2026-12-1').recipient,'');
+ const state=(await admin(api.get('/api/state'))).body;assert.equal(state.programs.length,2);assert.equal(state.meetings.length,4);
+ const november=(await admin(api.get('/api/monthly-report?month=2026-11&program=2026-11'))).body;assert.equal(november.summary.scheduled,1);
+});
