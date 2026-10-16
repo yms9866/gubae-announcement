@@ -13,7 +13,7 @@ class MemoryStore{
  async write(c,id,expected,updater){const old=await this.get(c,id);if(expected!=null&&expected!==(old?.revision||0))throw new ConflictError();const next={...updater(old),id,revision:(old?.revision||0)+1,updatedAt:'2026-10-16T12:00:00.000Z'};this.data[c].set(id,next);this.v++;return structuredClone(next)}
 }
 const meeting=(id,date)=>({id,topic:'ማኅበረ ልደታ ለማርያም',date,startTime:'21:00',durationMinutes:90,link:'https://rit.zoom.us/j/98378810255',recipient:'+971501234567',teacherId:null,sent:{},revision:1});
-function setup(){const store=new MemoryStore();store.data.meetings.set('1',meeting('1','2026-10-15'));store.data.meetings.set('2',meeting('2','2026-10-20'));const app=createApp({store,verifyAdmin:async t=>{if(t!=='admin')throw Error('Invalid');return{email:'admin@example.com'}},origins:['https://app.example.com'],frontendUrl:'https://app.example.com',now:()=>new Date('2026-10-16T12:00:00Z')});return{store,api:request(app)}}
+function setup({publicAccess=false}={}){const store=new MemoryStore();store.data.meetings.set('1',meeting('1','2026-10-15'));store.data.meetings.set('2',meeting('2','2026-10-20'));const app=createApp({store,publicAccess,verifyAdmin:async t=>{if(t!=='admin')throw Error('Invalid');return{email:'admin@example.com'}},origins:['https://app.example.com'],frontendUrl:'https://app.example.com',now:()=>new Date('2026-10-16T12:00:00Z')});return{store,api:request(app)}}
 const report={organizerName:'Organizer',status:'held',participants:35,teachingRating:4,teachingFeedback:'Clear and helpful.',comments:'Follow up next week.',revision:0};
 const admin=req=>req.set('Authorization','Bearer admin');
 test('private data requires verified admin; disallowed browser origins receive no CORS permission',async()=>{const{api}=setup();assert.equal((await api.get('/api/state')).status,401);assert.equal((await api.get('/api/state').set('Authorization','Bearer invalid')).status,401);const cfg=await api.get('/api/config');assert.equal(cfg.status,200);assert(!JSON.stringify(cfg.body).includes('recipient'));const r=await admin(api.get('/api/state')).set('Origin','https://evil.example');assert(!r.headers['access-control-allow-origin']);assert.equal(r.body.meetings.length,2)});
@@ -60,4 +60,15 @@ test('schedule imports assign known teachers, keep missing names pending and res
  assert.equal((await api.post('/api/teachers/resolve-assignments').send({})).status,401);
  const resolved=await admin(api.post('/api/teachers/resolve-assignments')).send({});assert.equal(resolved.status,200);assert.equal(resolved.body.assigned,1);assert.equal(store.data.meetings.get('2026-11-2').teacherId,added.id);assert.equal(store.data.meetings.get('2026-11-3').teacherId,known.id);
  const linked=await admin(api.patch('/api/meetings/2026-11-2')).send({revision:2,details:{link:'https://rit.zoom.us/j/98378810255'}});assert.equal(linked.status,200);assert.equal(linked.body.linkPending,false);
+});
+
+test('explicit public-access mode permits shared reads and writes without Google but keeps validation and revisions',async()=>{
+ const {api}=setup({publicAccess:true});const cfg=await api.get('/api/config');assert.equal(cfg.body.accessMode,'public');
+ const state=await api.get('/api/state');assert.equal(state.status,200);assert.equal(state.body.meetings.length,2);
+ const teacher=await api.post('/api/teachers').send({name:'Shared teacher',phone:'+971501234567'});assert.equal(teacher.status,201);assert((await api.get('/api/state')).body.teachers.some(t=>t.phone==='+971501234567'));
+ assert.equal((await api.post('/api/teachers').send({name:'Invalid',phone:'bad'})).status,400);
+ const updated=await api.put('/api/meetings/1/status/link').send({revision:1,sent:true});assert.equal(updated.status,200);assert(updated.body.sent.link);
+ assert.equal((await api.put('/api/meetings/1/status/link').send({revision:1,sent:false})).status,409);
+ const saved=await api.put('/api/meetings/1/report').send(report);assert.equal(saved.status,200);assert.equal(saved.body.submittedBy,'public-visitor');
+ assert.equal((await api.put('/api/meetings/2/report').send(report)).status,403);
 });

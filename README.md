@@ -107,3 +107,9 @@ Imported teacher names are private schedule metadata. Active teacher contacts ma
 A missing or ambiguous contact does not block loading the program or assigning matched rows. Teachers shows only unresolved names, with **Add this teacher** prefilled for missing contacts and manual assignment for ambiguous matches. Saving or importing teacher contacts retries pending matching. The authenticated matching endpoint does not overwrite manual assignments.
 
 Schedules without Zoom links are drafts. They can be edited and assigned teachers, but invitation preparation and invitation sent confirmations are blocked until a Zoom link is added. No previous month’s Zoom link is silently reused. Teacher names never enter public announcement messages.
+
+## Open access
+
+This deployment uses `PUBLIC_ACCESS=true` on Render at the owner’s request. `/api/config` announces `accessMode: public`, and the site automatically loads shared Firestore records without Google Authentication. Every visitor can view contacts, teacher details, reports, and shared statuses and use the existing editing/import/report features. There is no visitor identity verification; reports saved through the shared workspace identify the actor as `public-visitor`. Revision conflict handling, input validation, rate limiting, and report-day checks still apply.
+
+Firestore client rules continue to deny direct client access, and the service-account credential remains a Render secret. Open access is limited to the application’s existing APIs; it does not grant Firebase-console, Render, or GitHub access. Existing scoped organizer links continue working. Set `PUBLIC_ACCESS=false` and deploy to restore the Google administrator allowlist.
