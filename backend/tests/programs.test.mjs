@@ -11,6 +11,6 @@ test('monthly CSV supports quoted topics, spreadsheet columns, defaults and prog
 });
 test('monthly program validation rejects missing details, duplicate meetings, unsafe posters and dates in a different program',()=>{
  for(const meetings of [[{...row,topic:undefined}],[row,row],[{...row,poster:'javascript:alert(1)'}],[{...row,date:'2027-02-01'}]])assert.throws(()=>validateProgram({month:'2026-12',meetings}),/Row/);
- assert.throws(()=>parseProgramCsv('topic,date\nName,2026-12-20'),/link/);
+ assert.equal(validateProgram({month:'2026-12',meetings:parseProgramCsv('topic,date\nName,2026-12-20')}).meetings[0].linkPending,true);
  assert.throws(()=>validateProgram({month:'2026-13',meetings:[row]}),/month/);
 });

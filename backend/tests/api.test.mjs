@@ -49,3 +49,15 @@ test('teacher replacement snapshots survive later reassignment and organizer lin
  const other=await admin(api.post('/api/teachers')).send({name:'Later assigned teacher',phone:'+971509876543'});await admin(api.patch('/api/meetings/1')).send({revision:1,teacherId:other.body.id});
  const summary=(await admin(api.get('/api/monthly-report?month=2026-10'))).body;assert.equal(summary.summary.teacherReplacements,1);assert.equal(summary.summary.assignedDidNotTeach,1);assert.equal(summary.teacherChanges[0].assignedTeacherName,'Assigned teacher');assert.equal(summary.teacherChanges[0].actualTeacherName,'Cover teacher');
 });
+
+test('schedule imports assign known teachers, keep missing names pending and resolve them without overwriting manual choices',async()=>{
+ const {api,store}=setup();const known=(await admin(api.post('/api/teachers')).send({name:'ዲያቆን ዶክተር ሙከራ',phone:'+971501234567'})).body;
+ const loaded=await admin(api.post('/api/programs')).send({month:'2026-11',label:'New schedule',carryContacts:true,meetings:[{topic:'One',date:'Nov. 15',scheduledTeacherName:'ዲ/ን ዶ/ር ሙከራ'},{topic:'Two',date:'Nov 16',scheduledTeacherName:'Missing teacher'},{topic:'Three',date:'Nov 16',scheduledTeacherName:'Missing teacher'}]});assert.equal(loaded.status,201);
+ assert.equal(store.data.meetings.get('2026-11-1').teacherId,known.id);assert.equal(store.data.meetings.get('2026-11-2').teacherId,null);assert.equal(store.data.meetings.get('2026-11-2').date,'2026-11-16');assert.equal(store.data.meetings.get('2026-11-2').link,'');
+ assert.equal((await admin(api.put('/api/meetings/2026-11-2/status/link')).send({revision:1,sent:true})).status,400);
+ await admin(api.patch('/api/meetings/2026-11-3')).send({revision:1,teacherId:known.id});
+ const added=(await admin(api.post('/api/teachers')).send({name:'Missing teacher',phone:'+971509876543'})).body;
+ assert.equal((await api.post('/api/teachers/resolve-assignments').send({})).status,401);
+ const resolved=await admin(api.post('/api/teachers/resolve-assignments')).send({});assert.equal(resolved.status,200);assert.equal(resolved.body.assigned,1);assert.equal(store.data.meetings.get('2026-11-2').teacherId,added.id);assert.equal(store.data.meetings.get('2026-11-3').teacherId,known.id);
+ const linked=await admin(api.patch('/api/meetings/2026-11-2')).send({revision:2,details:{link:'https://rit.zoom.us/j/98378810255'}});assert.equal(linked.status,200);assert.equal(linked.body.linkPending,false);
+});
