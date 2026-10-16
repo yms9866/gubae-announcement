@@ -15,6 +15,9 @@ test('frontend boots all 41 gubaes and renders teacher, organizer, and monthly r
  assert.equal(document.querySelectorAll('.task-row').length>0,true);
  assert.match(document.querySelector('#syncText').textContent,/On this device/);
  for(const [view,title]of [['teachers','Teachers & Zoom invitations'],['reports','Gubae day reports'],['monthly','Monthly service report'],['settings','Shared workspace'],['meetings','41 gatherings']]){document.querySelector(`[data-view="${view}"]`).onclick();assert(document.querySelector('#content').textContent.includes(title),view+' renders')}
+ document.querySelector('[data-meeting-filter="held"]').click();assert.equal(document.querySelectorAll('.meeting-card').length,1);assert.equal(document.querySelector('[data-meeting-filter="held"]').getAttribute('aria-pressed'),'true');assert.equal(document.querySelector('.meeting-status').textContent,'Held');
+ for(const status of ['upcoming','overdue']){document.querySelector(`[data-meeting-filter="${status}"]`).click();assert([...document.querySelectorAll('.meeting-status')].every(el=>el.classList.contains(status)));}
+ document.querySelector('[data-meeting-filter="all"]').click();assert.equal(document.querySelectorAll('.meeting-card').length,41);
  document.querySelector('[data-view="teachers"]').onclick();assert.match(document.querySelector('#content').textContent,/Private teacher/);assert.equal(document.querySelectorAll('[data-assignment]').length,41);
  const dialog=document.querySelector('#workspaceDialog');dialog.showModal=()=>dialog.setAttribute('open','');dialog.close=()=>dialog.removeAttribute('open');
  document.querySelector('#importTeachers').click();document.querySelector('#teacherImportText').value='name,phone\n<script>alert(1)</script>,+971509876543\nPrivate teacher,+971501234567';
