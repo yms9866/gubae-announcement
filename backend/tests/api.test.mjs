@@ -7,6 +7,7 @@ import {monthlyReport,dateRange,validateReport,reportCsv} from '../../dist/repor
 class MemoryStore{
  constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),programs:new Map(),report_links:new Map(),settings:new Map()};this.v=1}
  async createProgram(program,meetings){if(this.data.programs.has(program.id))throw new ConflictError();for(const m of meetings)this.data.meetings.set(m.id,{...m,revision:1});this.data.programs.set(program.id,program);this.v++;return program;}
+ async saveMeetingReport(id,meetingRevision,reportRevision,data){const m=await this.get('meetings',id),r=await this.get('reports',id);if(!m)throw Object.assign(Error('Gubae not found.'),{status:404});if(m.revision!==meetingRevision||(r?.revision||0)!==reportRevision)throw new ConflictError();const record=await this.write('reports',id,reportRevision,()=>data);await this.write('meetings',id,meetingRevision,old=>({...old,outcome:'held',outcomeReason:''}));return record;}
  async updateProgram(id,expected,label){const old=this.data.programs.get(id);if(!old&&![...this.data.meetings.values()].some(m=>(m.programId||'2026-10')===id))throw Object.assign(Error('Month not found.'),{status:404});if((old?.revision||0)!==expected)throw new ConflictError();return this.write('programs',id,expected,()=>({id,month:id,label}));}
  async deleteProgram(id,expected){const old=this.data.programs.get(id),meetings=[...this.data.meetings.values()].filter(m=>(m.programId||'2026-10')===id);if(!old&&!meetings.length)throw Object.assign(Error('Month not found.'),{status:404});if((old?.revision||0)!==expected)throw new ConflictError();for(const m of meetings)for(const kind of ['meetings','reports','report_links'])this.data[kind].delete(m.id);this.data.programs.delete(id);this.v++;return{deleted:meetings.length};}
  async get(c,id){return structuredClone(this.data[c].get(id)||null)}
@@ -48,7 +49,7 @@ test('teacher replacement snapshots survive later reassignment and organizer lin
  const link=await admin(api.post('/api/meetings/1/report-link')).send({});const token=new URLSearchParams(new URL(link.body.url).hash.slice(1)).get('token');
  const info=await api.get('/api/public/report/1').set('Authorization','Bearer '+token);assert.equal(info.body.meeting.assignedTeacherName,'Assigned teacher');assert(!JSON.stringify(info.body).includes('+971'));
  const saved=await api.put('/api/public/report/1').set('Authorization','Bearer '+token).send({...report,teacherOutcome:'replacement',actualTeacherName:'Cover teacher',teacherChangeReason:'Assigned teacher unavailable'});assert.equal(saved.status,200);assert.equal(saved.body.assignedTeacherName,'Assigned teacher');
- const other=await admin(api.post('/api/teachers')).send({name:'Later assigned teacher',phone:'+971509876543'});await admin(api.patch('/api/meetings/1')).send({revision:1,teacherId:other.body.id});
+ const other=await admin(api.post('/api/teachers')).send({name:'Later assigned teacher',phone:'+971509876543'});await admin(api.patch('/api/meetings/1')).send({revision:2,teacherId:other.body.id});
  const summary=(await admin(api.get('/api/monthly-report?month=2026-10'))).body;assert.equal(summary.summary.teacherReplacements,1);assert.equal(summary.summary.assignedDidNotTeach,1);assert.equal(summary.teacherChanges[0].assignedTeacherName,'Assigned teacher');assert.equal(summary.teacherChanges[0].actualTeacherName,'Cover teacher');
 });
 
@@ -93,4 +94,16 @@ test('month rename and confirmed deletion preserve other months and teacher cont
  assert.equal((await api.delete('/api/programs/2026-10').send({revision:0,confirm:'2026-10'})).status,409);assert.equal(store.data.meetings.size,3);
  const deleted=await api.delete('/api/programs/2026-10').send({revision:1,confirm:'2026-10'});assert.equal(deleted.status,200);assert.equal(deleted.body.deleted,2);assert.equal(store.data.meetings.size,1);assert(store.data.meetings.has('other'));assert.equal(store.data.reports.size,0);assert.equal(store.data.report_links.size,0);assert.equal(store.data.teachers.size,1);assert.equal((await api.get('/api/reminders/due')).body.count,0);
  assert.equal((await api.delete('/api/programs/2026-10').send({revision:0,confirm:'2026-10'})).status,404);
+});
+
+test('organizer reports always mark held; meeting-list status is independent and reflected in reports',async()=>{
+ const {api,store}=setup({publicAccess:true});
+ assert.equal((await api.put('/api/meetings/1/outcome').send({revision:1,outcome:'missed',reason:''})).status,400);
+ const missed=await api.put('/api/meetings/1/outcome').send({revision:1,outcome:'missed',reason:'Teacher unavailable'});assert.equal(missed.status,200);assert.equal(store.data.reports.size,0);
+ let dashboard=(await api.get('/api/monthly-report?month=2026-10')).body;assert.equal(dashboard.summary.missed,1);assert.equal(dashboard.missedReasons[0].reason,'Teacher unavailable');
+ const saved=await api.put('/api/meetings/1/report').send({...report,status:'missed'});assert.equal(saved.status,200);assert.equal(saved.body.status,'held');assert.equal(store.data.meetings.get('1').outcome,'held');assert.equal(store.data.meetings.get('1').outcomeReason,'');
+ const revision=store.data.meetings.get('1').revision;assert.equal((await api.put('/api/meetings/1/outcome').send({revision:1,outcome:'cancelled',reason:'No venue'})).status,409);
+ const manual=await api.put('/api/meetings/1/outcome').send({revision,outcome:'cancelled',reason:'No venue'});assert.equal(manual.status,200);dashboard=(await api.get('/api/monthly-report?month=2026-10')).body;assert.equal(dashboard.summary.held,0);assert.equal(dashboard.summary.cancelled,1);assert.equal(dashboard.summary.totalParticipants,0);assert.equal(dashboard.rows[0].report.participants,35,'manual change preserves report content');
+ const restored=await api.put('/api/meetings/1/report').send({...report,revision:saved.body.revision});assert.equal(restored.status,200);assert.equal(store.data.meetings.get('1').outcome,'held');
+ const direct=await api.put('/api/meetings/2/outcome').send({revision:1,outcome:'held'});assert.equal(direct.status,200);dashboard=(await api.get('/api/monthly-report?month=2026-10')).body;assert.equal(dashboard.summary.held,2);assert.equal(dashboard.summary.totalParticipants,35);assert.equal(dashboard.summary.averageParticipants,35);assert.equal(dashboard.rows[1].report,null,'manual held does not fabricate attendance');
 });

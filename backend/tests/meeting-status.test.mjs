@@ -12,3 +12,5 @@ test('meeting filters use confirmed outcomes and the scheduled end in Dubai',()=
  assert.equal(meetingStatus(overnight,null,new Date('2026-10-17T00:15:00+04:00')),'upcoming');
  assert.equal(meetingStatus(overnight,null,new Date('2026-10-17T00:30:00+04:00')),'overdue');
 });
+
+test('explicit meeting-list outcome takes precedence over an older report',()=>{for(const outcome of ['held','missed','cancelled','postponed'])assert.equal(meetingStatus({...meeting,outcome},{status:'held'}),outcome);assert.equal(meetingStatus({...meeting,outcome:null},{status:'held'}),'held');});

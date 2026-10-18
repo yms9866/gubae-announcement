@@ -123,3 +123,7 @@ Settings and Recipients include a shared reminder email list (up to 50 addresses
 ## Vercel frontend deployment
 
 Import the existing `yms9866/gubae-announcements` repository, main branch, with the repository root as Root Directory. The committed `vercel.json` selects Other, skips the build, and serves only `dist`. The Render backend remains a separate service and Firestore remains the source of shared records. Once Vercel assigns the production domain, add its HTTPS origin to Render's `ALLOWED_ORIGINS` and set `FRONTEND_URL` to that origin. Verify `/api/state`, `due.html`, poster assets and a shared status save before switching reminder links. Email reminders currently still use the connected ChatGPT automation until a separate scheduler and mail transport are configured.
+
+## Meeting outcomes and organizer reports
+
+Organizer reports record participation and teaching feedback; both report endpoints always mark the meeting Held in the same Firestore transaction as the report save. Reports no longer offer Held/Missed/Cancelled/Postponed controls. All meetings provides Set meeting status with an explanation required for non-held outcomes. Explicit meeting outcomes take precedence over historical report statuses; submitting or updating a report marks Held again. Manual Held does not create a report or invent attendance. Shared filters, due reminders, monthly dashboards, detailed tables and CSV exports read the effective meeting outcome. Existing reports remain preserved.

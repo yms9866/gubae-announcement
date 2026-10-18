@@ -1,5 +1,6 @@
 // A meeting becomes overdue after its scheduled end in Dubai, unless its outcome is reported.
 export function meetingStatus(meeting,report,now=new Date()){
+ if(['held','missed','cancelled','postponed'].includes(meeting.outcome))return meeting.outcome;
  if(['held','missed','cancelled','postponed'].includes(report?.status))return report.status;
  const start=new Date(meeting.date+'T'+(meeting.startTime||'21:00')+':00+04:00').getTime();
  const end=start+(meeting.durationMinutes||90)*60000;
