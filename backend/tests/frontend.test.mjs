@@ -12,6 +12,7 @@ test('frontend boots all 41 gubaes and renders teacher, organizer, and monthly r
  try{
  await import('../../dist/app.mjs?test='+Date.now());
  await new Promise(resolve=>setImmediate(resolve));
+ document.querySelector('[data-filter="all"]').click();
  assert.equal(document.querySelectorAll('.task-row').length>0,true);
  assert.match(document.querySelector('#syncText').textContent,/On this device/);
  for(const [view,title]of [['teachers','Teachers & Zoom invitations'],['reports','Gubae day reports'],['monthly','Monthly service report'],['settings','Shared workspace'],['meetings','41 gatherings']]){document.querySelector(`[data-view="${view}"]`).onclick();assert(document.querySelector('#content').textContent.includes(title),view+' renders')}

@@ -5,7 +5,7 @@ import {createApp} from '../app.mjs';
 import {ConflictError} from '../store.mjs';
 import {monthlyReport,dateRange,validateReport,reportCsv} from '../../dist/reporting.mjs';
 class MemoryStore{
- constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),programs:new Map(),report_links:new Map()};this.v=1}
+ constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),programs:new Map(),report_links:new Map(),settings:new Map()};this.v=1}
  async createProgram(program,meetings){if(this.data.programs.has(program.id))throw new ConflictError();for(const m of meetings)this.data.meetings.set(m.id,{...m,revision:1});this.data.programs.set(program.id,program);this.v++;return program;}
  async get(c,id){return structuredClone(this.data[c].get(id)||null)}
  async list(c){return structuredClone([...this.data[c].values()])}
@@ -71,4 +71,14 @@ test('explicit public-access mode permits shared reads and writes without Google
  assert.equal((await api.put('/api/meetings/1/status/link').send({revision:1,sent:false})).status,409);
  const saved=await api.put('/api/meetings/1/report').send(report);assert.equal(saved.status,200);assert.equal(saved.body.submittedBy,'public-visitor');
  assert.equal((await api.put('/api/meetings/2/report').send(report)).status,403);
+});
+
+test('shared reminder configuration validates recipients and revisions; due endpoint excludes sent and ended meetings',async()=>{
+ const {api,store}=setup({publicAccess:true});
+ assert.equal((await api.put('/api/reminders/config').send({revision:0,enabled:true,recipients:['bad\r\nBcc:evil@example.com']})).status,400);
+ const saved=await api.put('/api/reminders/config').send({revision:0,enabled:true,recipients:['JossiMogs@gmail.com','jossimogs@gmail.com']});assert.equal(saved.status,200);assert.deepEqual(saved.body.recipients,['jossimogs@gmail.com']);
+ assert.equal((await api.put('/api/reminders/config').send({revision:0,enabled:false,recipients:[]})).status,409);
+ store.data.meetings.set('3',meeting('3','2026-10-17'));store.data.meetings.get('3').sent={poster:'done'};
+ const due=await api.get('/api/reminders/due');assert.equal(due.status,200);assert.deepEqual(due.body.items.map(i=>i.key),['3:link']);assert.equal(due.body.enabled,true);assert.equal(due.body.dueUrl,'https://app.example.com/due.html');assert(!JSON.stringify(due.body).includes('+971'));
+ assert.deepEqual((await api.get('/api/state')).body.reminderSettings.recipients,['jossimogs@gmail.com']);
 });
