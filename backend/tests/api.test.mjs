@@ -7,6 +7,8 @@ import {monthlyReport,dateRange,validateReport,reportCsv} from '../../dist/repor
 class MemoryStore{
  constructor(){this.data={meetings:new Map(),teachers:new Map(),reports:new Map(),programs:new Map(),report_links:new Map(),settings:new Map()};this.v=1}
  async createProgram(program,meetings){if(this.data.programs.has(program.id))throw new ConflictError();for(const m of meetings)this.data.meetings.set(m.id,{...m,revision:1});this.data.programs.set(program.id,program);this.v++;return program;}
+ async updateProgram(id,expected,label){const old=this.data.programs.get(id);if(!old&&![...this.data.meetings.values()].some(m=>(m.programId||'2026-10')===id))throw Object.assign(Error('Month not found.'),{status:404});if((old?.revision||0)!==expected)throw new ConflictError();return this.write('programs',id,expected,()=>({id,month:id,label}));}
+ async deleteProgram(id,expected){const old=this.data.programs.get(id),meetings=[...this.data.meetings.values()].filter(m=>(m.programId||'2026-10')===id);if(!old&&!meetings.length)throw Object.assign(Error('Month not found.'),{status:404});if((old?.revision||0)!==expected)throw new ConflictError();for(const m of meetings)for(const kind of ['meetings','reports','report_links'])this.data[kind].delete(m.id);this.data.programs.delete(id);this.v++;return{deleted:meetings.length};}
  async get(c,id){return structuredClone(this.data[c].get(id)||null)}
  async list(c){return structuredClone([...this.data[c].values()])}
  async version(){return this.v}
@@ -81,4 +83,14 @@ test('shared reminder configuration validates recipients and revisions; due endp
  store.data.meetings.set('3',meeting('3','2026-10-17'));store.data.meetings.get('3').sent={poster:'done'};
  const due=await api.get('/api/reminders/due');assert.equal(due.status,200);assert.deepEqual(due.body.items.map(i=>i.key),['3:link']);assert.equal(due.body.enabled,true);assert.equal(due.body.dueUrl,'https://app.example.com/due.html');assert(!JSON.stringify(due.body).includes('+971'));
  assert.deepEqual((await api.get('/api/state')).body.reminderSettings.recipients,['jossimogs@gmail.com']);
+});
+
+test('month rename and confirmed deletion preserve other months and teacher contacts',async()=>{
+ const {api,store}=setup({publicAccess:true});store.data.meetings.set('other',{...meeting('other','2026-11-20'),programId:'2026-11'});store.data.reports.set('1',{id:'1',status:'held'});store.data.report_links.set('1',{tokenHash:'old'});store.data.teachers.set('teacher',{name:'Teacher'});
+ assert.equal((await api.patch('/api/programs/2026-10').send({revision:0,label:''})).status,400);
+ const renamed=await api.patch('/api/programs/2026-10').send({revision:0,label:'ጥቅምት 2019'});assert.equal(renamed.status,200);assert.equal(renamed.body.revision,1);assert.equal(store.data.meetings.size,3);
+ assert.equal((await api.delete('/api/programs/2026-10').send({revision:1,confirm:'wrong'})).status,400);
+ assert.equal((await api.delete('/api/programs/2026-10').send({revision:0,confirm:'2026-10'})).status,409);assert.equal(store.data.meetings.size,3);
+ const deleted=await api.delete('/api/programs/2026-10').send({revision:1,confirm:'2026-10'});assert.equal(deleted.status,200);assert.equal(deleted.body.deleted,2);assert.equal(store.data.meetings.size,1);assert(store.data.meetings.has('other'));assert.equal(store.data.reports.size,0);assert.equal(store.data.report_links.size,0);assert.equal(store.data.teachers.size,1);assert.equal((await api.get('/api/reminders/due')).body.count,0);
+ assert.equal((await api.delete('/api/programs/2026-10').send({revision:0,confirm:'2026-10'})).status,404);
 });
