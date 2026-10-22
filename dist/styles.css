@@ -27,3 +27,5 @@
 .meeting-filters .chip.selected{border-bottom-color:var(--green);background:#eaf0e3;color:var(--green)}
 .meeting-status.today{background:#fff0c9;border-color:#e5c272;color:#795615;font-weight:600}
 @media(max-width:600px){.meeting-filters{gap:5px}.meeting-filters .chip{padding:10px;font-size:11px}}
+
+.amharic-report{display:grid;gap:17px;font-size:14px;line-height:1.9}.amharic-report .field,.organizer-page .field{font-size:14px;line-height:1.8}.amharic-report [data-held-fields]{display:grid;gap:17px}.amharic-report .notice,.amharic-report .muted{font-size:12px;line-height:1.9}.organizer-page h1,.organizer-page h2{line-height:1.8}.organizer-page .primary{font-size:14px}#reportForm .primary{font-size:14px}
