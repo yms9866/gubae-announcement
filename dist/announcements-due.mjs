@@ -1,8 +1,8 @@
 import {tasksFor,dubaiDate} from './core.mjs';
 import {meetingStatus} from './meeting-status.mjs';
-export function dueAnnouncements(meetings,reports=[],now=new Date(),sent={}){
+export function dueAnnouncements(meetings,reports=[],now=new Date(),sent={},timing){
  const today=dubaiDate(now),byId=new Map(reports.map(r=>[r.meetingId||r.id,r]));
- return tasksFor(meetings).filter(t=>!sent[t.key]&&!t.meeting.sent?.[t.type]&&t.due<=today&&meetingStatus(t.meeting,byId.get(t.meeting.id),now)==='upcoming');
+ return tasksFor(meetings,timing).filter(t=>!sent[t.key]&&!t.meeting.sent?.[t.type]&&new Date(t.dueAt)<=now&&meetingStatus(t.meeting,byId.get(t.meeting.id),now)==='upcoming');
 }
 export function reminderEmails(value){
  if(!Array.isArray(value)&&typeof value!=='string')throw Error('Enter email addresses separated by commas or new lines.');

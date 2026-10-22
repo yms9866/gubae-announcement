@@ -51,5 +51,14 @@
       "destination": "/report.html",
       "permanent": false
     }
+  ],
+  "proxy": {
+    "entrypoint": "proxy.mjs"
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://gubae-announcements-api.onrender.com/api/:path*"
+    }
   ]
 }

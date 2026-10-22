@@ -18,7 +18,7 @@ function fetchGubaeDue_() {
     try {
       const response = UrlFetchApp.fetch(GUBAE.api, {
         method: 'get', muteHttpExceptions: true, followRedirects: false,
-        headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }
+        headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Authorization: 'Bearer ' + PropertiesService.getScriptProperties().getProperty('GUBAE_API_TOKEN') }
       });
       if (response.getResponseCode() !== 200) throw new Error('API HTTP ' + response.getResponseCode());
       return JSON.parse(response.getContentText());
@@ -45,13 +45,14 @@ function validateGubaeDue_(data, today) {
     const key = value.toLowerCase();
     if (!seen.has(key) && recipients.length < 50) { recipients.push(value); seen.add(key); }
   }
-  let posters = 0, invitations = 0;
+  let posters = 0, invitations = 0, reports = 0;
   for (const item of data.items) {
     if (item.type === 'poster') posters++;
     else if (item.type === 'link') invitations++;
+    else if (item.type === 'report') reports++;
     else throw new Error('Unknown announcement type; no email sent.');
   }
-  return { enabled: data.enabled, recipients, posters, invitations, count: data.count };
+  return { enabled: data.enabled, recipients, posters, invitations, reports, count: data.count };
 }
 
 function wasGubaeSent_(subject) {
@@ -91,7 +92,7 @@ function runGubaeReminders() {
       throw new Error('A send was attempted today. Check Gmail Sent before clearing attemptDate in Script Properties.');
     }
     if (MailApp.getRemainingDailyQuota() < due.recipients.length) throw new Error('Insufficient email quota; no email sent.');
-    const summary = due.count + ' announcements pending: ' + due.posters + ' posters and ' + due.invitations + ' Zoom invitations.';
+    const summary = due.count + ' announcements pending: ' + due.posters + ' posters and ' + due.invitations + ' Zoom invitations and ' + due.reports + ' report links.';
     const steps = 'Open the page, prepare each announcement, send it in WhatsApp, and mark it sent so all helpers share the same status.';
     const options = {
       name: 'Gubae reminders',

@@ -1,3 +1,4 @@
+import {DEFAULT_TIMING,ANNOUNCEMENT_KINDS,announcementDeadline} from './announcement-timing.mjs';
 export const shiftDate=(iso,days)=>{const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};
 export const dubaiDate=(now=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Dubai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
 export const prettyDate=(iso)=>new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(new Date(iso+'T12:00:00Z'));
@@ -11,5 +12,12 @@ export const phoneDigits=value=>{const s=value.trim().replace(/[\s()\-]/g,'');if
 export const phoneList=value=>value.split('/').map(p=>p.trim()).filter(Boolean);
 export const validPhoneList=value=>phoneList(value).length>0&&phoneList(value).every(p=>phoneDigits(p));
 export const waUrl=(phone,text)=>{const p=phoneDigits(phone);if(!p)throw new Error('Enter an international phone number with country code.');return 'https://wa.me/'+p+'?text='+encodeURIComponent(text)};
-export const tasksFor=meetings=>meetings.flatMap(m=>['poster','link'].map(type=>({meeting:m,type,key:m.id+':'+type,due:shiftDate(m.date,type==='poster'?-3:-1)}))).sort((a,b)=>a.due.localeCompare(b.due)||Number(a.meeting.id)-Number(b.meeting.id)||a.type.localeCompare(b.type));
-export const statusOf=(task,sent,today)=>sent[task.key]?'sent':task.meeting.date<today?'past':task.due<today?'overdue':task.due===today?'today':'upcoming';
+export const tasksFor=(meetings,timing=DEFAULT_TIMING)=>meetings.flatMap(m=>ANNOUNCEMENT_KINDS.map(type=>{const dueAt=announcementDeadline(m,type,timing);return{meeting:m,type,key:m.id+':'+type,dueAt,due:dubaiDate(new Date(dueAt))}})).sort((a,b)=>a.dueAt.localeCompare(b.dueAt)||String(a.meeting.id).localeCompare(String(b.meeting.id))||a.type.localeCompare(b.type));
+export const statusOf=(task,sent,dateOrNow=new Date())=>{
+ if(sent[task.key]||task.meeting.sent?.[task.type])return 'sent';
+ const precise=dateOrNow instanceof Date,now=precise?dateOrNow:new Date(dateOrNow+'T23:59:59+04:00'),today=precise?dubaiDate(now):dateOrNow;
+ const start=new Date(task.meeting.date+'T'+(task.meeting.startTime||'21:00')+':00+04:00'),end=start.getTime()+(task.meeting.durationMinutes||90)*60000;
+ if(now.getTime()>=end)return 'past';
+ if(task.dueAt&&new Date(task.dueAt)>now)return 'upcoming';
+ return task.due<today?'overdue':task.due===today?'today':'upcoming';
+};

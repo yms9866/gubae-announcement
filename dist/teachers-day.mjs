@@ -30,7 +30,7 @@ async function refresh(){
   const configResponse=await fetch('./cloud-config.json',{cache:'no-store'});if(!configResponse.ok)throw Error('Connection settings could not load.');
   const config=await configResponse.json(),api=new URL(config.apiBase);
   if(api.protocol!=='https:')throw Error('The backend address must use HTTPS.');
-  const response=await fetch(api.origin+'/api/state',{cache:'no-store',signal:AbortSignal.timeout(90000)});
+  const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(90000)});
   if(!response.ok)throw Error('The shared schedule could not load. Please retry.');
   const data=await response.json();if(!Array.isArray(data.meetings)||!Array.isArray(data.teachers))throw Error('The schedule response was incomplete.');
   snapshot=data;draw();status.textContent='Shared schedule updated · Dubai time';

@@ -1,6 +1,21 @@
-# Independent Gmail reminders
+# Private workspace reminders
 
-This Google Apps Script runs in the owner's Google account, with no ChatGPT dependency. It uses the existing Render API, shared recipient settings and Vercel due page. No API keys or passwords are needed.
+The workspace now requires administrator Google sign-in. Email scheduling uses a separate, reminder-only key and cannot access contacts, meetings, editing, or reports through the workspace API.
+
+1. Sign into the site and open Setup & backup → Email reminder list.
+2. Click Connect Google Apps Script reminders, then Copy key.
+3. In your existing Google Apps Script project, open Project Settings → Script Properties and add GUBAE_API_TOKEN with that key as its value.
+4. Replace Code.gs with the current version in this folder. Keep the key out of the code and repository.
+5. Run checkGubaeSetup (read-only) to confirm the connection. Existing triggers can remain.
+6. Only install triggers if the project has none. Do not run both the old ChatGPT reminder and Google reminder schedulers.
+
+The script includes poster, Zoom link, and report link counts. All due timing is read from the live backend and configured on the site's Setup page.
+
+Reconnecting generates a new key and invalidates the previous scheduler key. Recipients still need administrator access to open the due page; a reminder email does not grant workspace access.
+
+## Original activation instructions
+
+This Google Apps Script runs in the owner's Google account, with no ChatGPT dependency. It uses the existing Render API, shared recipient settings and Vercel due page. The reminder-only key is stored in Script Properties; Google sign-in protects the workspace.
 
 ## Activate
 

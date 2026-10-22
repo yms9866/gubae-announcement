@@ -29,18 +29,18 @@ function reportErrorAm(error){
 const teacherOutcomeLabel=value=>({assigned:'የተመደበው መምህር አስተምሯል',replacement:'ተተኪ መምህር አስተምሯል',not_taught:'የተመደበው መምህር አላስተማረም፤ ተተኪም አልነበረም',unknown:'አልተመዘገበም / አይታወቅም'}[value||'unknown']||'አልተመዘገበም / አይታወቅም');
 function reportFields(r={}){
  const actual=r.actualTeacherName||(r.teacherOutcome==='assigned'?r.assignedTeacherName:'')||'';
- return `<div lang="am" class="amharic-report">${field('የሪፖርት አቅራቢው ስም','organizerName',r.organizerName||'','text',true)}${field('ያስተማረው መምህር','actualTeacherName',actual,'text',true)}<div class="editor-grid">${field('የተሳታፊዎች ብዛት','participants',r.participants??'','number')}<label class="field">የትምህርቱ ግምገማ<select name="teachingRating"><option value="">ከ1 እስከ 5 ይምረጡ</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.teachingRating===n?'selected':''}>${n} · ${['መሻሻል ያስፈልገዋል','መካከለኛ','ጥሩ','በጣም ጥሩ','እጅግ በጣም ጥሩ'][n-1]}</option>`).join('')}</select></label></div>${area('ትምህርቱ እንዴት ነበር?','teachingFeedback',r.teachingFeedback||'')}${area('አስተያየት / ክትትል የሚያስፈልገው ጉዳይ','comments',r.comments||'')}</div>`;
+ return `<div lang="am" class="amharic-report">${field('የሪፖርት አቅራቢው ስም','organizerName',r.organizerName||'','text',true)}${field('ያስተማረው መምህር','actualTeacherName',actual,'text',true)}${field('የተሳታፊዎች ብዛት','participants',r.participants??'','number')}<label class="field">የትምህርቱ ግምገማ<select name="teachingRating"><option value="">ከ1 እስከ 5 ይምረጡ</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.teachingRating===n?'selected':''}>${n} · ${['መሻሻል ያስፈልገዋል','መካከለኛ','ጥሩ','በጣም ጥሩ','እጅግ በጣም ጥሩ'][n-1]}</option>`).join('')}</select></label>${area('አስተያየት','comments',r.comments||'')}</div>`;
 }
 function bindReportFields(form){
  const input=name=>form.querySelector(`[name="${name}"]`);
  input('participants').required=true;input('participants').min='0';input('participants').max='100000';input('participants').step='1';
  input('actualTeacherName').maxLength=120;input('actualTeacherName').required=true;
- input('teachingRating').required=true;input('teachingFeedback').required=true;
+ input('teachingRating').required=true;
 }
 export function readReport(form,assignedName='',previous={}){
  const values=Object.fromEntries(new FormData(form));
  const sameTeacher=String(values.actualTeacherName||'').normalize('NFKC').trim()===String(previous.actualTeacherName||'').normalize('NFKC').trim();
- return {...validateReport({...values,status:'held',teacherEntryMode:'name',assignedTeacherName:assignedName,teacherChangeReason:sameTeacher?previous.teacherChangeReason||'':''}),teacherEntryMode:'name'};
+ return {...validateReport({...values,teachingFeedback:previous.teachingFeedback||'',status:'held',teacherEntryMode:'name',assignedTeacherName:assignedName,teacherChangeReason:sameTeacher?previous.teacherChangeReason||'':''}),teacherEntryMode:'name'};
 }
 
 export function reportPageUrl(value){

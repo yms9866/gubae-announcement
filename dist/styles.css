@@ -29,3 +29,6 @@
 @media(max-width:600px){.meeting-filters{gap:5px}.meeting-filters .chip{padding:10px;font-size:11px}}
 
 .amharic-report{display:grid;gap:17px;font-size:14px;line-height:1.9}.amharic-report .field,.organizer-page .field{font-size:14px;line-height:1.8}.amharic-report [data-held-fields]{display:grid;gap:17px}.amharic-report .notice,.amharic-report .muted{font-size:12px;line-height:1.9}.organizer-page h1,.organizer-page h2{line-height:1.8}.organizer-page .primary{font-size:14px}#reportForm .primary{font-size:14px}
+
+.amharic-report .field:has(select[name="teachingRating"]){grid-column:1/-1;width:100%;min-width:0}.amharic-report select[name="teachingRating"]{width:100%;max-width:100%;min-height:48px;font-size:14px}
+.timing-rule{display:grid;grid-template-columns:minmax(130px,1fr) 110px 180px;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border)}.timing-rule strong{font-size:13px}.due-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}.due-tabs .chip{font-size:13px;padding:12px 16px;border:1px solid var(--border)}.due-tabs .chip.selected{background:var(--green);color:white}.due-tabs .chip em{font-size:11px}@media(max-width:600px){.timing-rule{grid-template-columns:1fr 1fr}.timing-rule strong{grid-column:1/-1}.timing-rule .field{min-width:0}.due-tabs .chip{padding:10px 12px}}

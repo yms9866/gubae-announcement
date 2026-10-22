@@ -124,3 +124,43 @@ test('single teacher-name reports infer coverage and preserve the original assig
  assert.equal(dashboard.summary.teacherReplacements,1);assert.equal(dashboard.teacherChanges[0].actualTeacherName,'ቀሲስ አብነት');
  assert.equal((await write({...report,revision:3,teacherEntryMode:'name',actualTeacherName:''})).status,400);
 });
+
+test('secure browser sessions protect state and do not accept report or arbitrary cookies',async()=>{
+ const store=new MemoryStore();store.data.meetings.set('1',meeting('1','2026-10-15'));
+ const app=createApp({store,origins:['https://app.example.com'],frontendUrl:'https://app.example.com',verifyAdmin:async token=>{if(token!=='admin')throw Object.assign(Error('No'),{status:401});return{email:'owner@example.com'};},createSessionCookie:async()=> 'verified-session',verifySessionCookie:async value=>{if(value!=='verified-session')throw Error('No');return{email:'owner@example.com'};}});
+ const api=request(app);
+ assert.equal((await api.get('/api/state')).status,401);
+ assert.equal((await api.get('/api/browser-session').set('Cookie','__Host-gubae_session=invalid')).status,401);
+ assert.equal((await api.post('/api/browser-session').send({})).status,401);
+ assert.equal((await api.post('/api/browser-session').set('Origin','https://evil.example').set('Authorization','Bearer admin').send({})).status,403);
+ const session=await api.post('/api/browser-session').set('Origin','https://app.example.com').set('Authorization','Bearer admin').send({});
+ assert.equal(session.status,200);const cookie=session.headers['set-cookie'][0];assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.match(cookie,/SameSite=Lax/);
+ assert.equal((await api.get('/api/state').set('Cookie',cookie)).status,200);
+ assert.equal((await api.get('/api/browser-session').set('Cookie',cookie)).body.authenticated,true);
+ const logout=await api.delete('/api/browser-session').set('Origin','https://app.example.com');assert.equal(logout.status,204);assert.match(logout.headers['set-cookie'][0],/Expires=/);
+});
+test('saved timing controls report announcements and report preparation does not invalidate links',async()=>{
+ const {api,store}=setup();store.data.meetings.get('1').date='2026-10-17';
+ const saved=await admin(api.put('/api/announcement-timing')).send({revision:0,timing:{poster:{amount:3,unit:'days'},link:{amount:1,unit:'days'},report:{amount:36,unit:'hours'}}});
+ assert.equal(saved.status,200);assert.equal((await admin(api.get('/api/state'))).body.announcementTiming.timing.report.amount,36);
+ const due=await admin(api.get('/api/reminders/due'));assert(due.body.items.some(item=>item.key==='1:report'));
+ assert.equal((await admin(api.put('/api/announcement-timing')).send({revision:1,timing:{report:{amount:-1,unit:'hours'}}})).status,400);
+ const original=await admin(api.post('/api/meetings/1/report-link')).send({});const token=url=>new URLSearchParams(new URL(url).hash.slice(1)).get('token');
+ delete store.data.report_links.get('1').token;
+ const prepared=await admin(api.post('/api/meetings/1/report-link/prepare')).send({});
+ const repeated=await admin(api.post('/api/meetings/1/report-link/prepare')).send({});
+ assert.equal(token(prepared.body.url),token(repeated.body.url));assert.equal(new URL(prepared.body.url).pathname,'/report.html');
+ for(const url of [original.body.url,prepared.body.url])assert.equal((await api.get('/api/public/report/1').set('Authorization','Bearer '+token(url))).status,200);
+ const sent=await admin(api.put('/api/meetings/1/status/report')).send({revision:1,sent:true});assert.equal(sent.status,200);
+ assert(!(await admin(api.get('/api/reminders/due'))).body.items.some(item=>item.key==='1:report'));
+ await admin(api.post('/api/meetings/1/report-link')).send({});
+ assert.equal((await api.get('/api/public/report/1').set('Authorization','Bearer '+token(prepared.body.url))).status,401);
+});
+test('reminder scheduler credentials are scoped to reminder data and can be rotated',async()=>{
+ const {api}=setup();const created=await admin(api.post('/api/reminders/scheduler-token')).send({});
+ assert.equal(created.status,200);const auth=req=>req.set('Authorization','Bearer '+created.body.token);
+ assert.equal((await auth(api.get('/api/reminders/due'))).status,200);
+ assert.equal((await auth(api.get('/api/state'))).status,401);
+ await admin(api.post('/api/reminders/scheduler-token')).send({});
+ assert.equal((await auth(api.get('/api/reminders/due'))).status,401);
+});
