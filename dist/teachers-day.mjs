@@ -2,7 +2,7 @@ import {teacherDays} from './teacher-days.mjs';
 import {prettyDate,timeRange,phoneList,phoneDigits,message,waUrl} from './core.mjs';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const root=document.querySelector('#teacherDays'),status=document.querySelector('#dayStatus'),button=document.querySelector('#refreshDays');
-let snapshot=null,busy=false;
+let snapshot=null,busy=false,saving=false;
 const composer=document.querySelector('#teacherComposer'),form=document.querySelector('#teacherMessageForm'),text=document.querySelector('#teacherMessage'),phone=document.querySelector('#teacherPhone'),composeError=document.querySelector('#composeError');
 let composing=null;
 function updateSend(){document.querySelector('#openTeacherWhatsApp').disabled=!text.value.trim()||!phoneDigits(phone.value);}
@@ -18,14 +18,25 @@ text.oninput=updateSend;phone.onchange=updateSend;
 document.querySelector('#insertTeacherLink').onclick=()=>{if(!composing?.link)return;try{text.value=(text.value.trim()?text.value.trim()+'\n\n':'')+message(composing);updateSend()}catch(e){composeError.textContent=e.message}};
 form.onsubmit=e=>{e.preventDefault();composeError.textContent='';try{if(!text.value.trim())throw Error('Write a message first.');const target=waUrl(phone.value,text.value.trim());window.open(target,'_blank','noopener,noreferrer');document.querySelector('#composeResult').textContent='Message prepared. Press Send inside WhatsApp.';}catch(e){composeError.textContent=e.message}};
 composer.addEventListener('close',()=>{composing=null;document.querySelector('#composeResult').textContent=''});
+async function toggleTeacherSent(id,control){
+ const meeting=snapshot?.meetings.find(m=>m.id===id);if(!meeting||saving)return;
+ const sent=!meeting.sent?.teacher;saving=true;control.disabled=true;button.disabled=true;
+ try{
+  const response=await fetch('/api/meetings/'+encodeURIComponent(id)+'/status/teacher',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:meeting.revision,sent}),cache:'no-store'});
+  const result=await response.json();if(!response.ok)throw Error(response.status===409?'This gubae changed on another device. Refresh before trying again.':result.error||'Could not save the teacher invitation status.');
+  snapshot.meetings=snapshot.meetings.map(m=>m.id===id?result:m);draw();status.className='';status.textContent=sent?'Teacher invitation marked sent · synced':'Teacher invitation marked pending · synced';
+ }catch(error){status.className='error';status.textContent=error.message;control.disabled=false;}
+ finally{saving=false;button.disabled=false;}
+}
 function draw(){
  if(!snapshot)return;
  const groups=teacherDays(snapshot.meetings,snapshot.teachers,snapshot.reports||[]);
- root.innerHTML=groups.length?groups.map(group=>`<section class="day-group"><h2>Teachers for ${esc(group.weekday)}</h2><p class="day-date">${prettyDate(group.date)} · ${group.meetings.length} gubae(s)</p>${group.meetings.map(({meeting:m,teacher:t})=>`<article class="day-assignment"><h3 lang="am">${esc(m.topic)}</h3><p class="day-teacher" lang="am">${esc(t?.name||m.scheduledTeacherName||'Teacher not assigned')}${!t&&m.scheduledTeacherName?' · contact assignment pending':''}</p><p>${timeRange(m)} · Dubai</p>${t?.phone?phoneList(t.phone).map(p=>phoneDigits(p)?`<a class="day-phone" href="tel:+${phoneDigits(p)}">${esc(p)}</a>`:'').join(''): '<p class="muted">No saved teacher phone number.</p>'}${t&&phoneList(t.phone||'').some(phoneDigits)?`<div class="button-row teacher-send-actions"><button class="primary" data-teacher-compose="${esc(m.id)}" data-kind="link" ${!m.link?'disabled':''}>Send Zoom link ↗</button><button class="secondary" data-teacher-compose="${esc(m.id)}" data-kind="custom">Custom message</button></div>${!m.link?'<p class="muted">Add the Zoom link in All meetings to send an invitation.</p>':''}`:'<p class="muted">Assign a teacher with a valid phone number in the workspace to send messages.</p>'}</article>`).join('')}</section>`).join(''):'<div class="day-empty">No teachers are due to appear yet. Gubaes appear here two days before their date; completed, missed, cancelled and postponed gubaes are excluded.</div>';
+ root.innerHTML=groups.length?groups.map(group=>`<section class="day-group"><h2>Teachers for ${esc(group.weekday)}</h2><p class="day-date">${prettyDate(group.date)} · ${group.meetings.length} gubae(s)</p>${group.meetings.map(({meeting:m,teacher:t})=>`<article class="day-assignment"><h3 lang="am">${esc(m.topic)}</h3><p class="day-teacher" lang="am">${esc(t?.name||m.scheduledTeacherName||'Teacher not assigned')}${!t&&m.scheduledTeacherName?' · contact assignment pending':''}</p><p>${timeRange(m)} · Dubai</p>${t?.phone?phoneList(t.phone).map(p=>phoneDigits(p)?`<a class="day-phone" href="tel:+${phoneDigits(p)}">${esc(p)}</a>`:'').join(''): '<p class="muted">No saved teacher phone number.</p>'}${t&&phoneList(t.phone||'').some(phoneDigits)?`<div class="button-row teacher-send-actions"><button class="primary" data-teacher-compose="${esc(m.id)}" data-kind="link" ${!m.link?'disabled':''}>Send Zoom link ↗</button><button class="secondary" data-teacher-compose="${esc(m.id)}" data-kind="custom">Custom message</button></div>${!m.link?'<p class="muted">Add the Zoom link in All meetings to send an invitation.</p>':''}`:'<p class="muted">Assign a teacher with a valid phone number in the workspace to send messages.</p>'}${t?`<div class="button-row teacher-send-actions"><button class="secondary" data-teacher-sent="${esc(m.id)}" ${!m.link&&!m.sent?.teacher?'disabled':''}>${m.sent?.teacher?'✓ Sent · undo':'Mark sent'}</button><span class="muted">${m.sent?.teacher?'Teacher invitation sent.':'Mark sent after sending in WhatsApp.'}</span></div>`:''}</article>`).join('')}</section>`).join(''):'<div class="day-empty">No teachers are due to appear yet. Gubaes appear here two days before their date; completed, missed, cancelled and postponed gubaes are excluded.</div>';
+ root.querySelectorAll('[data-teacher-sent]').forEach(b=>b.onclick=()=>toggleTeacherSent(b.dataset.teacherSent,b));
  root.querySelectorAll('[data-teacher-compose]').forEach(b=>b.onclick=()=>openComposer(b.dataset.teacherCompose,b.dataset.kind));
 }
 async function refresh(){
- if(busy)return;busy=true;button.disabled=true;status.className='';status.textContent=snapshot?'Refreshing the shared schedule…':'Loading the shared schedule…';
+ if(busy||saving)return;busy=true;button.disabled=true;status.className='';status.textContent=snapshot?'Refreshing the shared schedule…':'Loading the shared schedule…';
  try{
   const configResponse=await fetch('./cloud-config.json',{cache:'no-store'});if(!configResponse.ok)throw Error('Connection settings could not load.');
   const config=await configResponse.json(),api=new URL(config.apiBase);
@@ -38,6 +49,6 @@ async function refresh(){
  finally{busy=false;button.disabled=false;}
 }
 button.onclick=refresh;
-setInterval(()=>{draw();if(!document.hidden)refresh()},60000);
+setInterval(()=>{if(saving)return;draw();if(!document.hidden)refresh()},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw();refresh()}});
 await refresh();
