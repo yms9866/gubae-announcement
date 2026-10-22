@@ -1,8 +1,15 @@
+import {validateReport} from './reporting.mjs';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const field=(label,name,value='',type='text',required=false)=>`<label class="field">${label}<input name="${name}" type="${type}" value="${esc(value)}" ${required?'required':''}></label>`;
 const area=(label,name,value='',required=false)=>`<label class="field">${label}<textarea name="${name}" rows="3" maxlength="6000" ${required?'required':''}>${esc(value)}</textarea></label>`;
 
-const reportDate=iso=>new Intl.DateTimeFormat('am-ET-u-ca-gregory',{timeZone:'UTC',year:'numeric',month:'long',day:'numeric'}).format(new Date(iso+'T12:00:00Z'));
+const reportDate=iso=>{
+ const date=new Date(iso+'T12:00:00Z');
+ const english=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',day:'numeric',month:'short',year:'numeric'}).formatToParts(date);
+ const ethiopian=new Intl.DateTimeFormat('am-ET-u-ca-ethiopic',{timeZone:'UTC',day:'numeric',month:'long',year:'numeric'}).formatToParts(date);
+ const part=(list,key)=>list.find(p=>p.type===key)?.value||'';
+ return part(english,'day')+' '+part(english,'month')+'. '+part(english,'year')+' / '+part(ethiopian,'month')+' '+part(ethiopian,'day')+' '+part(ethiopian,'year');
+};
 const reportStatusAm=value=>({held:'ተካሂዷል',missed:'አልተካሄደም',cancelled:'ተሰርዟል',postponed:'ተራዝሟል'}[value]||'አልተመዘገበም');
 function reportErrorAm(error){
  const value=String(error?.message||error||'');
@@ -14,18 +21,26 @@ function reportErrorAm(error){
  'Rate the teaching from 1 to 5.':'ለትምህርቱ ከ1 እስከ 5 ያለ ደረጃ ይስጡ።'
  };
  if(exact[value])return exact[value];
- const fields={'Organizer name':'የሪፖርት አቅራቢው ስም','Assigned teacher name':'የተመደበው መምህር ስም','Replacement teacher name':'የተተኪው መምህር ስም','Reason assigned teacher did not teach':'መምህሩ ያላስተማረበት ምክንያት','Teaching feedback':'ስለ ትምህርቱ አስተያየት','Comments':'አስተያየት'};
+ const fields={'Teacher who taught':'ያስተማረው መምህር','Organizer name':'የሪፖርት አቅራቢው ስም','Assigned teacher name':'የተመደበው መምህር ስም','Replacement teacher name':'የተተኪው መምህር ስም','Reason assigned teacher did not teach':'መምህሩ ያላስተማረበት ምክንያት','Teaching feedback':'ስለ ትምህርቱ አስተያየት','Comments':'አስተያየት'};
  for(const [key,label]of Object.entries(fields))if(value.startsWith(key+':')){const max=value.match(/(\d+) characters/);return label+'፦ '+(value.includes('enter text')?'እባክዎ ይሙሉ። ':'')+(max?'እስከ '+max[1]+' ፊደላት ብቻ ያስገቡ።':'ያስተካክሉ።');}
  return 'ሪፖርቱን መጫን ወይም ማስቀመጥ አልተቻለም። ግንኙነትዎን ያረጋግጡና እንደገና ይሞክሩ። ማገናኛው ጊዜው ያበቃ ከሆነ አዲስ ማገናኛ ይጠይቁ።';
 }
 
 const teacherOutcomeLabel=value=>({assigned:'የተመደበው መምህር አስተምሯል',replacement:'ተተኪ መምህር አስተምሯል',not_taught:'የተመደበው መምህር አላስተማረም፤ ተተኪም አልነበረም',unknown:'አልተመዘገበም / አይታወቅም'}[value||'unknown']||'አልተመዘገበም / አይታወቅም');
-function reportFields(r={},assignedName=''){return `<div lang="am" class="amharic-report">${field('የሪፖርት አቅራቢው ስም','organizerName',r.organizerName||'','text',true)}<p class="notice">ይህን ሪፖርት ሲያስገቡ ጉባኤው እንደተካሄደ ይመዘገባል።</p><h3>ማን አስተማረ?</h3><label class="field">የመምህሩ ተሳትፎ<select name="teacherOutcome">${['unknown','assigned','replacement','not_taught'].map(value=>`<option value="${value}" ${(r.teacherOutcome||'unknown')===value?'selected':''}>${teacherOutcomeLabel(value)}</option>`).join('')}</select></label>${field('የተመደበው መምህር ስም','assignedTeacherName',r.assignedTeacherName||assignedName)}<div data-replacement-fields>${field('የተተኪው መምህር ስም','actualTeacherName',r.actualTeacherName||'')}</div><div data-teacher-reason>${area('የተመደበው መምህር ለምን አላስተማረም?','teacherChangeReason',r.teacherChangeReason||'')}</div><p class="muted">የመምህራን ስም በሪፖርቱ ብቻ ይካተታል፤ በማስታወቂያ መልእክቶች አይካተትም። የመምህሩ ተሳትፎ ካልተረጋገጠ «አይታወቅም» ይምረጡ።</p><div data-held-fields><div class="editor-grid">${field('የተሳታፊዎች ብዛት','participants',r.participants??'','number')}<label class="field">የትምህርቱ ግምገማ<select name="teachingRating"><option value="">ከ1 እስከ 5 ይምረጡ</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.teachingRating===n?'selected':''}>${n} · ${['መሻሻል ያስፈልገዋል','መካከለኛ','ጥሩ','በጣም ጥሩ','እጅግ በጣም ጥሩ'][n-1]}</option>`).join('')}</select></label></div>${area('ትምህርቱ እንዴት ነበር?','teachingFeedback',r.teachingFeedback||'')}</div>${area('አስተያየት / ክትትል የሚያስፈልገው ጉዳይ','comments',r.comments||'')}<p class="muted">የተሳታፊዎችን ብዛት እና ስለ ትምህርቱ አስተያየት ያስገቡ። ያልተካሄዱ፣ የተሰረዙ ወይም የተራዘሙ ጉባኤዎችን ሁኔታ በ«All meetings» ገጽ ላይ ይመዝግቡ።</p></div>`}
+function reportFields(r={}){
+ const actual=r.actualTeacherName||(r.teacherOutcome==='assigned'?r.assignedTeacherName:'')||'';
+ return `<div lang="am" class="amharic-report">${field('የሪፖርት አቅራቢው ስም','organizerName',r.organizerName||'','text',true)}${field('ያስተማረው መምህር','actualTeacherName',actual,'text',true)}<div class="editor-grid">${field('የተሳታፊዎች ብዛት','participants',r.participants??'','number')}<label class="field">የትምህርቱ ግምገማ<select name="teachingRating"><option value="">ከ1 እስከ 5 ይምረጡ</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.teachingRating===n?'selected':''}>${n} · ${['መሻሻል ያስፈልገዋል','መካከለኛ','ጥሩ','በጣም ጥሩ','እጅግ በጣም ጥሩ'][n-1]}</option>`).join('')}</select></label></div>${area('ትምህርቱ እንዴት ነበር?','teachingFeedback',r.teachingFeedback||'')}${area('አስተያየት / ክትትል የሚያስፈልገው ጉዳይ','comments',r.comments||'')}</div>`;
+}
 function bindReportFields(form){
- const named=name=>form.querySelector(`[name="${name}"]`);const update=()=>{const held=true;const outcome=named('teacherOutcome');for(const value of ['assigned','replacement'])outcome.querySelector(`option[value="${value}"]`).disabled=!held;if(!held&&['assigned','replacement'].includes(outcome.value))outcome.value='unknown';const replacement=outcome.value==='replacement',absent=replacement||outcome.value==='not_taught';
-  for(const [selector,visible] of [['[data-held-fields]',held],['[data-replacement-fields]',replacement],['[data-teacher-reason]',absent]]){const group=form.querySelector(selector);group.hidden=!visible;for(const input of group.querySelectorAll('input,textarea,select'))input.disabled=!visible;}
-  named('participants').required=held;named('participants').min='0';named('participants').max='100000';named('participants').step='1';named('assignedTeacherName').required=outcome.value!=='unknown';named('actualTeacherName').required=replacement;named('teacherChangeReason').required=absent;named('teachingRating').required=held&&outcome.value!=='not_taught';named('teachingFeedback').required=held&&outcome.value!=='not_taught';named('teachingRating').disabled=!held||outcome.value==='not_taught';
- };named('teacherOutcome').addEventListener('change',update);update();
+ const input=name=>form.querySelector(`[name="${name}"]`);
+ input('participants').required=true;input('participants').min='0';input('participants').max='100000';input('participants').step='1';
+ input('actualTeacherName').maxLength=120;input('actualTeacherName').required=true;
+ input('teachingRating').required=true;input('teachingFeedback').required=true;
+}
+export function readReport(form,assignedName='',previous={}){
+ const values=Object.fromEntries(new FormData(form));
+ const sameTeacher=String(values.actualTeacherName||'').normalize('NFKC').trim()===String(previous.actualTeacherName||'').normalize('NFKC').trim();
+ return {...validateReport({...values,status:'held',teacherEntryMode:'name',assignedTeacherName:assignedName,teacherChangeReason:sameTeacher?previous.teacherChangeReason||'':''}),teacherEntryMode:'name'};
 }
 
 export function reportPageUrl(value){

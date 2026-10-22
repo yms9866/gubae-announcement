@@ -1,14 +1,18 @@
+import {matchTeacher} from './teacher-match.mjs';
 import{meetingStatus}from'./meeting-status.mjs';
 export const validDate=value=>{if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const d=new Date(value+'T12:00:00Z');return !isNaN(d)&&d.toISOString().slice(0,10)===value};
 const text=(v,max,label,required=false)=>{if(typeof v!=='string')v='';v=v.trim();if((required&&!v)||v.length>max)throw Error(`${label}: ${required?'enter text, up to':'maximum'} ${max} characters.`);return v};
 export function validateReport(input){
  const status=input.status||'held';if(!['held','missed','cancelled','postponed'].includes(status))throw Error('Choose a valid meeting status.');
  let participants=Number(input.participants);if(status!=='held')participants=0;if((status==='held'&&(input.participants===''||input.participants===null||input.participants===undefined))||!Number.isInteger(participants)||participants<0||participants>100000)throw Error('Enter a participant count from 0 to 100000.');
- const teacherOutcome=input.teacherOutcome||'unknown';if(!['assigned','replacement','not_taught','unknown'].includes(teacherOutcome))throw Error('Choose who taught the gubae.');if(status!=='held'&&['assigned','replacement'].includes(teacherOutcome))throw Error('A teacher can only be recorded as having taught when the gubae was held.');
+ const nameEntry=input.teacherEntryMode==='name';
+ const typedTeacher=nameEntry?text(input.actualTeacherName,120,'Teacher who taught',true):'';
+ const scheduledName=nameEntry?text(input.assignedTeacherName,120,'Assigned teacher name'):'';
+ const teacherOutcome=nameEntry?(scheduledName?(matchTeacher(typedTeacher,[{id:'scheduled',name:scheduledName}]).status==='matched'?'assigned':'replacement'):'unknown'):input.teacherOutcome||'unknown';if(!['assigned','replacement','not_taught','unknown'].includes(teacherOutcome))throw Error('Choose who taught the gubae.');if(status!=='held'&&['assigned','replacement'].includes(teacherOutcome))throw Error('A teacher can only be recorded as having taught when the gubae was held.');
  const assignedTeacherName=text(input.assignedTeacherName,120,'Assigned teacher name',teacherOutcome!=='unknown');
- const actualTeacherName=teacherOutcome==='assigned'?assignedTeacherName:teacherOutcome==='replacement'?text(input.actualTeacherName,120,'Replacement teacher name',true):'';
- if(teacherOutcome==='replacement'&&assignedTeacherName.normalize('NFKC').toLowerCase()===actualTeacherName.normalize('NFKC').toLowerCase())throw Error('The replacement must be a different teacher.');
- const teacherChangeReason=['replacement','not_taught'].includes(teacherOutcome)?text(input.teacherChangeReason,2000,'Reason assigned teacher did not teach',true):'';
+ const actualTeacherName=nameEntry?typedTeacher:teacherOutcome==='assigned'?assignedTeacherName:teacherOutcome==='replacement'?text(input.actualTeacherName,120,'Replacement teacher name',true):'';
+ if(!nameEntry&&teacherOutcome==='replacement'&&assignedTeacherName.normalize('NFKC').toLowerCase()===actualTeacherName.normalize('NFKC').toLowerCase())throw Error('The replacement must be a different teacher.');
+ const teacherChangeReason=['replacement','not_taught'].includes(teacherOutcome)?text(input.teacherChangeReason,2000,'Reason assigned teacher did not teach',!nameEntry):'';
  const taught=status==='held'&&teacherOutcome!=='not_taught';const teachingRating=taught?Number(input.teachingRating):null;if(taught&&(!Number.isInteger(teachingRating)||teachingRating<1||teachingRating>5))throw Error('Rate the teaching from 1 to 5.');
  return{organizerName:text(input.organizerName,120,'Organizer name',true),status,participants,teachingRating,teachingFeedback:taught?text(input.teachingFeedback,4000,'Teaching feedback',true):'',comments:text(input.comments,6000,'Comments'),missedReason:status==='held'?'':text(input.missedReason,2000,'Why was the gubae not held?',true),teacherOutcome,assignedTeacherName,actualTeacherName,teacherChangeReason};
 }

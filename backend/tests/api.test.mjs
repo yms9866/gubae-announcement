@@ -107,3 +107,20 @@ test('organizer reports always mark held; meeting-list status is independent and
  const restored=await api.put('/api/meetings/1/report').send({...report,revision:saved.body.revision});assert.equal(restored.status,200);assert.equal(store.data.meetings.get('1').outcome,'held');
  const direct=await api.put('/api/meetings/2/outcome').send({revision:1,outcome:'held'});assert.equal(direct.status,200);dashboard=(await api.get('/api/monthly-report?month=2026-10')).body;assert.equal(dashboard.summary.held,2);assert.equal(dashboard.summary.totalParticipants,35);assert.equal(dashboard.summary.averageParticipants,35);assert.equal(dashboard.rows[1].report,null,'manual held does not fabricate attendance');
 });
+
+test('single teacher-name reports infer coverage and preserve the original assignment',async()=>{
+ const {api,store}=setup();store.data.teachers.set('scheduled',{id:'scheduled',name:'ዲያቆን ዳዊት'});store.data.meetings.get('1').teacherId='scheduled';
+ const link=await admin(api.post('/api/meetings/1/report-link')).send({});
+ const token=new URLSearchParams(new URL(link.body.url).hash.slice(1)).get('token');
+ const write=body=>api.put('/api/public/report/1').set('Authorization','Bearer '+token).send(body);
+ const first=await write({...report,teacherEntryMode:'name',actualTeacherName:'ዲ/ን ዳዊት',assignedTeacherName:'Spoofed name'});
+ assert.equal(first.status,200);assert.equal(first.body.teacherOutcome,'assigned');assert.equal(first.body.assignedTeacherName,'ዲያቆን ዳዊት');assert.equal(first.body.actualTeacherName,'ዲ/ን ዳዊት');
+ const second=await write({...report,revision:1,teacherEntryMode:'name',actualTeacherName:'ቀሲስ አብነት'});
+ assert.equal(second.status,200);assert.equal(second.body.teacherOutcome,'replacement');assert.equal(second.body.teacherChangeReason,'');assert.equal(second.body.status,'held');
+ store.data.teachers.set('later',{id:'later',name:'Later teacher'});store.data.meetings.get('1').teacherId='later';
+ const third=await write({...report,revision:2,teacherEntryMode:'name',actualTeacherName:'ቀሲስ አብነት'});
+ assert.equal(third.status,200);assert.equal(third.body.assignedTeacherName,'ዲያቆን ዳዊት');
+ const dashboard=(await admin(api.get('/api/monthly-report?month=2026-10'))).body;
+ assert.equal(dashboard.summary.teacherReplacements,1);assert.equal(dashboard.teacherChanges[0].actualTeacherName,'ቀሲስ አብነት');
+ assert.equal((await write({...report,revision:3,teacherEntryMode:'name',actualTeacherName:''})).status,400);
+});

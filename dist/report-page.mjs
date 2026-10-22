@@ -1,5 +1,4 @@
-import {reportFields,bindReportFields,reportDate,reportErrorAm} from './report-form.mjs';
-import {validateReport} from './reporting.mjs';
+import {reportFields,bindReportFields,reportDate,reportErrorAm,readReport} from './report-form.mjs';
 const root=document.querySelector('#reportPage');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const params=new URLSearchParams(location.search),fragment=new URLSearchParams(location.hash.slice(1));
@@ -20,7 +19,7 @@ async function start(){
    return data;
   }
   const data=await call('GET');
-  root.innerHTML=`<div class="report-header"><h1>የጉባኤ ሪፖርት</h1><h2>${esc(data.meeting.topic)}</h2><p>${reportDate(data.meeting.date)} · ዱባይ</p></div>${!data.canSubmit?'<p class="notice">ሪፖርት ማስገባት ጉባኤው በሚካሄድበት ቀን ይጀምራል። እባክዎ በዚያ ቀን ይመለሱ።</p>':`<form id="publicReport" class="form-stack" lang="am" novalidate>${reportFields(data.report||{},data.meeting.assignedTeacherName||'')}<button class="primary" type="submit">${data.report?'ሪፖርቱን ያዘምኑ':'ሪፖርቱን ይላኩ'}</button><p id="reportResult" role="status" aria-live="polite"></p></form>`}`;
+  root.innerHTML=`<div class="report-header"><h1>የጉባኤ ሪፖርት</h1><h2>${esc(data.meeting.topic)}</h2><p>${reportDate(data.meeting.date)}</p></div>${!data.canSubmit?'<p class="notice">ሪፖርት ማስገባት ጉባኤው በሚካሄድበት ቀን ይጀምራል። እባክዎ በዚያ ቀን ይመለሱ።</p>':`<form id="publicReport" class="form-stack" lang="am" novalidate>${reportFields(data.report||{},data.meeting.assignedTeacherName||'')}<button class="primary" type="submit">${data.report?'ሪፖርቱን ያዘምኑ':'ሪፖርቱን ይላኩ'}</button><p id="reportResult" role="status" aria-live="polite"></p></form>`}`;
   const form=root.querySelector('#publicReport');if(!form)return;
   bindReportFields(form);let saving=false;
   form.addEventListener('submit',async event=>{
@@ -28,7 +27,7 @@ async function start(){
    const button=form.querySelector('button[type="submit"]'),result=root.querySelector('#reportResult');
    button.disabled=true;result.className='';result.textContent='ሪፖርቱ እየተቀመጠ ነው…';
    try{
-    const input=validateReport({...Object.fromEntries(new FormData(form)),status:'held'});
+    const input=readReport(form,data.meeting.assignedTeacherName||'',data.report||{});
     data.report=await call('PUT',{...input,revision:data.report?.revision||0});
     button.textContent='ሪፖርቱን ያዘምኑ';result.className='success';result.textContent='እናመሰግናለን። ሪፖርትዎ ተቀምጧል።';
    }catch(error){result.className='error';result.textContent=reportErrorAm(error);}
