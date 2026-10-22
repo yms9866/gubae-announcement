@@ -81,7 +81,7 @@ function wasGubaeSent_(subject, recipient) {
 
 // Runs every five minutes but performs one successful daily check after 09:00 Dubai.
 // Failed requests retry at the next trigger. Google's scheduler may run late.
-function runGubaeReminders() {
+function runGubaeAnnouncementReminders_() {
   verifyGubaeAccount_();
   const now = new Date();
   if (Number(Utilities.formatDate(now, GUBAE.zone, 'H')) < 9) return;
@@ -120,14 +120,61 @@ function runGubaeReminders() {
   } finally { lock.releaseLock(); }
 }
 
+// Both reminder lists share the existing trigger and private API key.
+function runGubaeReminders() {
+  const failures = [];
+  try { runGubaeAnnouncementReminders_(); } catch (error) { failures.push('Announcement reminders: ' + error.message); }
+  try { runGubaeTeacherReminders_(); } catch (error) { failures.push('Teacher reminders: ' + error.message); }
+  if (failures.length) throw new Error(failures.join(' / '));
+}
+function validateTeacherDue_(data, today) {
+  const teacher = data && data.teacherReminders;
+  if (!teacher) return {enabled:false,recipients:[],count:0,items:[],recipientLinks:{}};
+  if (data.date !== today || data.timezone !== GUBAE.zone || typeof teacher.enabled !== 'boolean' || !Array.isArray(teacher.recipients) || teacher.recipients.length > 50 || !Number.isSafeInteger(teacher.count) || teacher.count < 0 || !Array.isArray(teacher.items) || teacher.items.length !== teacher.count) throw new Error('Invalid teacher reminder response.');
+  for (const email of teacher.recipients) {
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^https:\/\/gubae-announcements\.vercel\.app\/teachers-day\.html#teacherAccess=gtd_[A-Za-z0-9_-]{43}$/.test(teacher.recipientLinks && teacher.recipientLinks[email] || '')) throw new Error('Invalid teacher recipient or private link.');
+  }
+  for (const item of teacher.items) if (typeof item.topic !== 'string' || typeof item.teacherName !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.meetingDate)) throw new Error('Invalid teacher reminder item.');
+  return teacher;
+}
+function runGubaeTeacherReminders_() {
+  verifyGubaeAccount_();
+  const now = new Date();
+  if (Number(Utilities.formatDate(now, GUBAE.zone, 'H')) < 9) return;
+  const today = Utilities.formatDate(now, GUBAE.zone, 'yyyy-MM-dd');
+  const lock = LockService.getScriptLock();if (!lock.tryLock(1000)) return;
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty('teacherCompletedDate') === today) return;
+    const due = validateTeacherDue_(fetchGubaeDue_(), today);
+    const complete = () => props.setProperty('teacherCompletedDate', today);
+    if (!due.enabled || !due.recipients.length || !due.count) {complete();return;}
+    if (props.getProperty('teacherAttemptDate') === today) throw new Error('A teacher reminder send was attempted today. Check Gmail Sent before clearing teacherAttemptDate.');
+    if (MailApp.getRemainingDailyQuota() < due.recipients.length) throw new Error('Insufficient email quota; no teacher reminders sent.');
+    const subject = 'Gubae teacher invitations due · ' + today;
+    const summary = due.count + ' teacher invitations are pending.';
+    const details = due.items.map(item => item.teacherName + ' · ' + item.topic + ' · ' + item.meetingDate).join('\n');
+    const escape = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+    props.setProperty('teacherAttemptDate', today);
+    for (const recipient of due.recipients) {
+      if (wasGubaeSent_(subject, recipient)) continue;
+      const page = due.recipientLinks[recipient];
+      GmailApp.sendEmail(recipient, subject, summary + '\n\n' + details + '\n\n' + page + '\n\nSend the teacher invitations, then mark them sent on the page.', {name:'Gubae reminders',htmlBody:'<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>Teachers of the day</h2><p>'+escape(summary)+'</p><ul>'+due.items.map(item=>'<li>'+escape(item.teacherName)+' · '+escape(item.topic)+' · '+escape(item.meetingDate)+'</li>').join('')+'</ul><p><a href="'+escape(page)+'">Open Teachers of the day</a></p><p>Send the invitations, then mark them sent. Keep this private link to yourself.</p></div>'});
+    }
+    complete();props.deleteProperty('teacherAttemptDate');console.log('Teacher reminder sent: '+today+'; pending invitations: '+due.count);
+  } finally {lock.releaseLock();}
+}
+
 // Read-only check: no emails, triggers or completion records are changed.
 function checkGubaeSetup() {
   verifyGubaeAccount_();
   const today = Utilities.formatDate(new Date(), GUBAE.zone, 'yyyy-MM-dd');
-  const due = validateGubaeDue_(fetchGubaeDue_(), today);
+  const data = fetchGubaeDue_();
+  const due = validateGubaeDue_(data, today);
+  const teacher = validateTeacherDue_(data, today);
   const sent = wasGubaeSent_('Gubae announcements due · ' + today);
   console.log(JSON.stringify({ date: today, enabled: due.enabled, validRecipients: due.recipients.length,
-    posters: due.posters, invitations: due.invitations, alreadySent: sent,
+    posters: due.posters, invitations: due.invitations, alreadySent: sent, teacherRemindersEnabled:teacher.enabled, teacherRecipientCount:teacher.recipients.length, pendingTeacherInvitations:teacher.count,
     remainingQuota: MailApp.getRemainingDailyQuota() }));
 }
 

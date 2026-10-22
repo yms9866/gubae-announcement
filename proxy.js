@@ -1,5 +1,5 @@
 import {next} from '@vercel/functions';
-const PUBLIC=new Set(['/login.html','/login.mjs','/styles.css','/firebase-auth.mjs','/cloud-config.json','/report.html','/report-page.mjs','/report-form.mjs','/reporting.mjs','/teacher-match.mjs','/meeting-status.mjs','/favicon.ico','/robots.txt','/announcements.html','/announcements.mjs','/access.css','/core.mjs','/announcement-timing.mjs']);
+const PUBLIC=new Set(['/login.html','/login.mjs','/styles.css','/firebase-auth.mjs','/cloud-config.json','/report.html','/report-page.mjs','/report-form.mjs','/reporting.mjs','/teacher-match.mjs','/meeting-status.mjs','/favicon.ico','/robots.txt','/teachers-day.html','/teachers-day.mjs','/teacher-days.mjs','/announcements.html','/announcements.mjs','/access.css','/core.mjs','/announcement-timing.mjs']);
 const verified=new Map();
 export default async function proxy(request){
  const url=new URL(request.url);
