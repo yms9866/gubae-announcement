@@ -1,3 +1,4 @@
+import {accessForLink,accessHash,publicAccessEntries,ensureRecipientAccess,recipientAccessUrl} from './access.mjs';
 import {normalizeTiming,DEFAULT_TIMING} from '../dist/announcement-timing.mjs';
 import{dueAnnouncements,reminderEmails}from'../dist/announcements-due.mjs';
 import express from 'express';
@@ -20,8 +21,9 @@ export function createApp({store,verifyAdmin,createSessionCookie,verifySessionCo
  const app=express();app.disable('x-powered-by');app.use(helmet());app.use(cors({origin(origin,cb){cb(null,!origin||origins.includes(origin));},exposedHeaders:['ETag']}));app.use(express.json({limit:'512kb'}));app.param('id',(req,res,next,id)=>next(/^[A-Za-z0-9_-]{1,100}$/.test(id)?null:fail(400,'Invalid record ID.')));app.use('/api',(req,res,next)=>{res.set('Cache-Control','no-store');next()});app.use('/api',rateLimit({windowMs:60000,limit:180,standardHeaders:'draft-8',legacyHeaders:false}));
  const cookieValue=req=>{const entry=(req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith('__Host-gubae_session='));return entry?entry.slice('__Host-gubae_session='.length):''};
  const sameOrigin=req=>{if(req.headers.origin&&!origins.includes(req.headers.origin))throw fail(403,'This browser origin is not allowed.');};
- const verified=async req=>{const token=(req.headers.authorization||'').replace(/^Bearer /,'');if(token)return verifyAdmin(token);const cookie=cookieValue(req);if(cookie&&verifySessionCookie)return verifySessionCookie(cookie);throw fail(401,'Sign in with your administrator Google account.');};
- const admin=async(req,res,next)=>{if(publicAccess){req.admin={email:'public-visitor'};return next();}try{req.admin=await verified(req);next()}catch(e){next(e.status?e:fail(401,'Your sign-in expired. Sign in again.'))}};
+ const verified=async req=>{const token=(req.headers.authorization||'').replace(/^Bearer /,'');if(token.startsWith('gsa_'))return accessForLink(store,token,now());if(token)return verifyAdmin(token);const cookie=cookieValue(req);if(cookie&&verifySessionCookie){try{return await verifySessionCookie(cookie)}catch{}}const accessCookie=(req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith('__Host-gubae_access='))?.slice('__Host-gubae_access='.length);if(accessCookie)return accessForLink(store,accessCookie,now());throw fail(401,'Open your private link or sign in with an authorized Google account.');};
+ const member=async(req,res,next)=>{try{const token=(req.headers.authorization||'').replace(/^Bearer /,'');const linkCookie=(req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith('__Host-gubae_access='))?.split('=')[1];req.admin=token.startsWith('gsa_')||(!token&&linkCookie)?await accessForLink(store,token||linkCookie,now()):await verified(req);next()}catch(e){next(e.status?e:fail(401,'Sign in to open announcements.'))}};
+ const admin=async(req,res,next)=>{if(publicAccess){req.admin={email:'public-visitor'};return next();}try{req.admin=await verified(req);if(req.admin.scope&&req.admin.scope!=='full')throw fail(403,'This account can open announcements only.');next()}catch(e){next(e.status?e:fail(401,'Your sign-in expired. Sign in again.'))}};
 
  const linkAuth=async(req,res,next)=>{try{const token=(req.headers.authorization||'').replace(/^Bearer /,'');if(!/^gbr_[A-Za-z0-9_-]{43}$/.test(token))throw fail(401,'This report link is invalid.');const record=await store.get('report_links',req.params.id);const actual=hash(token);if(!record||record.expiresAt<=now().toISOString()||![record.tokenHash,record.previousTokenHash].filter(v=>typeof v==='string'&&v.length===64).some(v=>timingSafeEqual(Buffer.from(actual),Buffer.from(v))))throw fail(401,'This report link expired or was replaced. Ask the organizer for a new link.');req.linkRecord=record;next()}catch(e){next(e)}};
  app.get('/health',(req,res)=>res.json({ok:true,service:'gubae-announcements-api'}));
@@ -30,35 +32,58 @@ export function createApp({store,verifyAdmin,createSessionCookie,verifySessionCo
  app.post('/api/browser-session',async(req,res)=>{
   sameOrigin(req);const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   if(!token||!createSessionCookie)throw fail(401,'Sign in with your administrator Google account.');
-  let user;try{user=await verifyAdmin(token);}catch(e){throw fail(e.status||401,'Sign in with your authorized administrator Google account.');}const cookie=await createSessionCookie(token);
+  let user;try{user=await verifyAdmin(token);}catch(e){throw fail(e.status||401,'This Google account does not have site access.');}const cookie=await createSessionCookie(token);
   res.cookie('__Host-gubae_session',cookie,{httpOnly:true,secure:true,sameSite:'lax',path:'/',maxAge:5*86400000});
-  res.json({authenticated:true,email:user.email});
+  res.json({authenticated:true,email:user.email,scope:user.scope||'full',owner:user.owner===true});
  });
- app.get('/api/browser-session',async(req,res)=>{
-  const cookie=cookieValue(req);if(!cookie||!verifySessionCookie)throw fail(401,'Sign in required.');
-  try{const user=await verifySessionCookie(cookie);res.json({authenticated:true,email:user.email});}catch{throw fail(401,'Your sign-in expired.');}
- });
+ app.get('/api/browser-session',async(req,res)=>{const user=await verified(req);res.json({authenticated:true,email:user.email,scope:user.scope||'full',owner:user.owner===true,via:user.via||'google'});});
  app.delete('/api/browser-session',(req,res)=>{sameOrigin(req);res.clearCookie('__Host-gubae_session',{httpOnly:true,secure:true,sameSite:'lax',path:'/'});res.status(204).end();});
+
+ const owner=(req,res,next)=>{if(req.admin.owner===false)return next(fail(403,'Only the site owner can manage access.'));next()};
+ app.get('/api/access',admin,owner,async(req,res)=>{await ensureRecipientAccess(store);const [list,config]=await Promise.all([store.get('settings','email-reminders'),store.get('settings','workspace-access')]);res.json({revision:config?.revision||0,entries:publicAccessEntries(list?.recipients||[],config)})});
+ app.put('/api/access',admin,owner,async(req,res)=>{
+  const list=await store.get('settings','email-reminders');const recipients=list?.recipients||[];
+  if(!Array.isArray(req.body.entries)||req.body.entries.length!==recipients.length)throw fail(400,'Save the email list first, then refresh access controls.');
+  const seen=new Set();const entries=req.body.entries.map(e=>{if(!recipients.includes(e.email)||seen.has(e.email)||!['blocked','announcements','full'].includes(e.role)||!['google','link'].includes(e.method))throw fail(400,'Choose valid access for each email. ');seen.add(e.email);return{email:e.email,role:e.role,method:e.method}});
+  const result=await store.write('settings','workspace-access',revision(req.body),old=>({entries:entries.map(e=>{const prior=old?.entries?.find(v=>v.email===e.email);return prior?.role===e.role&&prior?.method===e.method?{...prior,...e}:e})}));
+  const config=await ensureRecipientAccess(store);res.json({revision:config?.revision||result.revision,entries:publicAccessEntries(recipients,config||result)});
+ });
+ app.post('/api/access/link',admin,owner,async(req,res)=>{
+  const email=String(req.body.email||'').toLowerCase(),list=await store.get('settings','email-reminders');if(!list?.recipients?.includes(email))throw fail(400,'Save this email in the reminder list first.');
+  const token='gsa_'+randomBytes(32).toString('base64url'),expiresAt=null;
+  await store.write('settings','workspace-access',revision(req.body),old=>{const entry=old?.entries?.find(e=>e.email===email);if(!['announcements','full'].includes(entry?.role)||entry.method!=='link')throw fail(400,'Save private-link access first.');return{entries:old.entries.map(e=>e.email===email?{...e,token,tokenHash:accessHash(token),expiresAt}:e)}});
+  const url=new URL('announcements.html',frontendUrl);url.hash=new URLSearchParams({access:token}).toString();res.json({url:url.href,expiresAt});
+ });
+ app.post('/api/access/open-link',admin,owner,async(req,res)=>{const config=await ensureRecipientAccess(store);const email=String(req.body.email||'').toLowerCase();const list=await store.get('settings','email-reminders');if(!list?.recipients?.includes(email))throw fail(400,'Email is not on the reminder list.');const url=recipientAccessUrl(email,config,frontendUrl);if(!url)throw fail(400,'Save access settings and create a link first.');res.json({url})});
+ app.post('/api/access/session',async(req,res)=>{sameOrigin(req);const token=(req.headers.authorization||'').replace(/^Bearer /,'');const user=await accessForLink(store,token,now());res.cookie('__Host-gubae_access',token,{httpOnly:true,secure:true,sameSite:'lax',path:'/',maxAge:5*86400000});res.json({email:user.email,scope:user.scope})});
+ app.delete('/api/access/session',(req,res)=>{sameOrigin(req);res.clearCookie('__Host-gubae_access',{httpOnly:true,secure:true,sameSite:'lax',path:'/'});res.status(204).end()});
+ const dueForAccess=async()=>{const [meetings,reports,timing]=await Promise.all([store.list('meetings'),store.list('reports'),store.get('settings','announcement-timing')]);return dueAnnouncements(meetings,reports,now(),{},timing?.timing)};
+ app.get('/api/announcements',member,async(req,res)=>{const items=(await dueForAccess()).map(t=>({key:t.key,type:t.type,due:t.due,meeting:{id:t.meeting.id,topic:t.meeting.topic,date:t.meeting.date,startTime:t.meeting.startTime||'21:00',link:t.type==='link'?t.meeting.link:'',recipient:t.meeting.recipient||'',revision:t.meeting.revision,hasPoster:t.type==='poster'&&!!t.meeting.poster}}));res.json({email:req.admin.email,scope:req.admin.scope||'full',date:dubaiDate(now()),items})});
+ const dueItem=async(id,kind)=>{const item=(await dueForAccess()).find(t=>t.meeting.id===id&&t.type===kind);if(!item)throw fail(403,'This announcement is not currently due. Refresh the list.');return item};
+ app.put('/api/announcements/:id/status/:kind',member,async(req,res)=>{if(req.body.sent!==true)throw fail(400,'Only sent confirmation is allowed here.');await dueItem(req.params.id,req.params.kind);res.json(await store.write('meetings',req.params.id,revision(req.body),old=>({id:old.id, ...old,sent:{...old.sent,[req.params.kind]:now().toISOString()}})).then(m=>({id:m.id,revision:m.revision}))) });
+ app.get('/api/announcements/:id/poster',member,async(req,res)=>{const item=await dueItem(req.params.id,'poster');const file=item.meeting.poster;if(!/^posters\/[A-Za-z0-9_-]+\.(png|jpg|jpeg)$/.test(file||''))throw fail(404,'Poster unavailable.');const {readFile}=await import('node:fs/promises');const buffer=await readFile(new URL('../dist/'+file,import.meta.url));res.type(file.endsWith('.png')?'png':'jpeg').send(buffer)});
+
  app.put('/api/announcement-timing',admin,async(req,res)=>{
   const timing=validated(()=>normalizeTiming(req.body.timing));
   res.json(await store.write('settings','announcement-timing',revision(req.body),()=>({timing})));
  });
 
- app.get('/api/state',admin,async(req,res)=>{const v=await store.version(),tag='"'+v+'"';res.set('Cache-Control','private, no-cache');res.set('ETag',tag);if(req.headers['if-none-match']===tag)return res.status(304).end();const[meetings,teachers,reports,programs,reminderSettings,announcementTiming]=await Promise.all([...['meetings','teachers','reports','programs'].map(n=>store.list(n)),store.get('settings','email-reminders'),store.get('settings','announcement-timing')]);res.json({version:v,meetings,teachers,reports,programs,reminderSettings:reminderSettings||{recipients:[],enabled:false,revision:0},announcementTiming:announcementTiming||{timing:DEFAULT_TIMING,revision:0},adminEmail:req.admin.email});});
- app.put('/api/reminders/config',admin,async(req,res)=>{const recipients=validated(()=>reminderEmails(req.body.recipients));if(typeof req.body.enabled!=='boolean')throw fail(400,'Choose whether reminders are enabled.');if(req.body.enabled&&!recipients.length)throw fail(400,'Add at least one reminder email.');res.json(await store.write('settings','email-reminders',revision(req.body),()=>({recipients,enabled:req.body.enabled})));});
+ app.get('/api/state',admin,async(req,res)=>{const v=await store.version(),tag='"'+v+'"';res.set('Cache-Control','private, no-cache');res.set('ETag',tag);if(req.headers['if-none-match']===tag)return res.status(304).end();const[meetings,teachers,reports,programs,reminderSettings,announcementTiming]=await Promise.all([...['meetings','teachers','reports','programs'].map(n=>store.list(n)),store.get('settings','email-reminders'),store.get('settings','announcement-timing')]);res.json({version:v,meetings,teachers,reports,programs,reminderSettings:reminderSettings||{recipients:[],enabled:false,revision:0},announcementTiming:announcementTiming||{timing:DEFAULT_TIMING,revision:0},adminEmail:req.admin.email,isOwner:req.admin.owner!==false});});
+ app.put('/api/reminders/config',admin,owner,async(req,res)=>{const recipients=validated(()=>reminderEmails(req.body.recipients));if(typeof req.body.enabled!=='boolean')throw fail(400,'Choose whether reminders are enabled.');if(req.body.enabled&&!recipients.length)throw fail(400,'Add at least one reminder email.');const result=await store.write('settings','email-reminders',revision(req.body),()=>({recipients,enabled:req.body.enabled}));await ensureRecipientAccess(store);res.json(result);});
 
  const schedulerOrAdmin=async(req,res,next)=>{
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   if(token.startsWith('gsr_')){try{const config=await store.get('settings','reminder-scheduler');const actual=hash(token);if(!config?.tokenHash||config.tokenHash.length!==64||!timingSafeEqual(Buffer.from(actual),Buffer.from(config.tokenHash)))throw fail(401,'The reminder scheduler must reconnect.');req.admin={email:'reminder-scheduler'};return next();}catch(e){return next(e);}}
-  return admin(req,res,next);
+  return admin(req,res,err=>err?next(err):owner(req,res,next));
  };
- app.post('/api/reminders/scheduler-token',admin,async(req,res)=>{
+ app.get('/api/reminders/script',admin,owner,async(req,res)=>{const {readFile}=await import('node:fs/promises');res.json({filename:'Gubae-Reminders.gs',script:await readFile(new URL('../automation/google-apps-script/Code.gs',import.meta.url),'utf8')})});
+ app.post('/api/reminders/scheduler-token',admin,owner,async(req,res)=>{
   const token='gsr_'+randomBytes(32).toString('base64url');
   await store.write('settings','reminder-scheduler',null,()=>({tokenHash:hash(token)}));
   res.json({token});
  });
 
- app.get('/api/reminders/due',schedulerOrAdmin,async(req,res)=>{const[meetings,reports,settings,timingSettings]=await Promise.all([store.list('meetings'),store.list('reports'),store.get('settings','email-reminders'),store.get('settings','announcement-timing')]);const items=dueAnnouncements(meetings,reports,now(),{},timingSettings?.timing).map(t=>({key:t.key,meetingId:t.meeting.id,topic:t.meeting.topic,type:t.type,due:t.due,dueAt:t.dueAt,meetingDate:t.meeting.date}));res.json({date:dubaiDate(now()),timezone:'Asia/Dubai',enabled:settings?.enabled===true,recipients:settings?.recipients||[],count:items.length,dueUrl:new URL('due.html',frontendUrl).href,items});});
+ app.get('/api/reminders/due',schedulerOrAdmin,async(req,res)=>{const access=await ensureRecipientAccess(store);const[meetings,reports,settings,timingSettings]=await Promise.all([store.list('meetings'),store.list('reports'),store.get('settings','email-reminders'),store.get('settings','announcement-timing')]);const items=dueAnnouncements(meetings,reports,now(),{},timingSettings?.timing).map(t=>({key:t.key,meetingId:t.meeting.id,topic:t.meeting.topic,type:t.type,due:t.due,dueAt:t.dueAt,meetingDate:t.meeting.date}));res.json({date:dubaiDate(now()),timezone:'Asia/Dubai',enabled:settings?.enabled===true,recipients:settings?.recipients||[],count:items.length,dueUrl:new URL('announcements.html',frontendUrl).href,recipientLinks:Object.fromEntries((settings?.recipients||[]).map(email=>[email,recipientAccessUrl(email,access,frontendUrl)])),items});});
  app.patch('/api/meetings/:id',admin,async(req,res)=>{const expected=revision(req.body);let teacherId=req.body.teacherId;if(teacherId!==undefined&&teacherId!==null){if(typeof teacherId!=='string'||!(await store.get('teachers',teacherId)))throw fail(400,'Choose an existing teacher.');}const result=await store.write('meetings',req.params.id,expected,old=>{requireMeeting(old);let next={...old};if(req.body.details){const details=validated(()=>normalizeMeetingEdit(old,req.body.details));if(Object.entries(details).some(([k,v])=>(old[k]??(k==='startTime'?'21:00':k==='durationMinutes'?90:undefined))!==v))next.sent={};Object.assign(next,details);}if(req.body.recipient!==undefined){if(typeof req.body.recipient!=='string'||req.body.recipient.length>100)throw fail(400,'Recipient numbers are too long.');next.recipient=req.body.recipient.trim();}if(teacherId!==undefined){next.teacherId=teacherId;if(teacherId!==old.teacherId)next.sent={...next.sent,teacher:null};}return next;});res.json(result);});
  app.put('/api/meetings/:id/outcome',admin,async(req,res)=>{const outcome=req.body.outcome;if(!['held','missed','cancelled','postponed','auto'].includes(outcome))throw fail(400,'Choose a valid meeting status.');const reason=typeof req.body.reason==='string'?req.body.reason.trim():'';if(reason.length>2000||(['missed','cancelled','postponed'].includes(outcome)&&!reason))throw fail(400,'Give a reason up to 2000 characters.');res.json(await store.write('meetings',req.params.id,revision(req.body),old=>{requireMeeting(old);return{...old,outcome:outcome==='auto'?null:outcome,outcomeReason:['held','auto'].includes(outcome)?'':reason};}));});
  app.put('/api/meetings/:id/status/:kind',admin,async(req,res)=>{if(!['poster','link','report','teacher'].includes(req.params.kind)||typeof req.body.sent!=='boolean')throw fail(400,'Choose a valid announcement status.');const result=await store.write('meetings',req.params.id,revision(req.body),old=>{requireMeeting(old);if(req.body.sent&&['link','teacher'].includes(req.params.kind)&&!old.link)throw fail(400,'Add a Zoom link before marking its invitation sent.');return{...old,sent:{...old.sent,[req.params.kind]:req.body.sent?now().toISOString():null}}});res.json(result);});
@@ -80,6 +105,7 @@ export function createApp({store,verifyAdmin,createSessionCookie,verifySessionCo
   const url=new URL('report.html',frontendUrl);url.searchParams.set('report',m.id);url.hash=new URLSearchParams({token,api:req.protocol+'://'+req.get('host')}).toString();
   res.json({url:url.href,expiresAt:expiry.toISOString()});
  };
+ app.post('/api/announcements/:id/report-link',member,async(req,res)=>{await dueItem(req.params.id,'report');return prepareReportLink(req,res,true)});
  app.post('/api/meetings/:id/report-link',admin,(req,res)=>prepareReportLink(req,res,false));
  app.post('/api/meetings/:id/report-link/prepare',admin,(req,res)=>prepareReportLink(req,res,true));
 

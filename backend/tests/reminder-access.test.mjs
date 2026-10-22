@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+test('reminder script sends one private link per recipient, skips blocked users, and does not BCC',async()=>{
+ const script=await readFile(new URL('../../automation/google-apps-script/Code.gs',import.meta.url),'utf8');const sent=[],props=new Map();
+ const links={'one@example.com':'https://gubae-announcements.vercel.app/announcements.html#access=gsa_'+'a'.repeat(43),'two@example.com':'https://gubae-announcements.vercel.app/announcements.html#access=gsa_'+'b'.repeat(43),'blocked@example.com':null};
+ const context={console:{log(){}},Session:{getEffectiveUser:()=>({getEmail:()=> 'jossimogs@gmail.com'})},Utilities:{formatDate:(date,zone,format)=>format==='H'?'12':'2026-10-22'},LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k),setProperty:(k,v)=>props.set(k,v),deleteProperty:k=>props.delete(k)})},MailApp:{getRemainingDailyQuota:()=>100},GmailApp:{search:()=>[],sendEmail:(to,subject,body,options)=>sent.push({to,body,options})},UrlFetchApp:{fetch:()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({date:'2026-10-22',timezone:'Asia/Dubai',enabled:true,recipients:Object.keys(links),recipientLinks:links,count:1,items:[{type:'link'}]})})}};
+ vm.createContext(context);vm.runInContext(script,context);context.runGubaeReminders();
+ assert.equal(sent.length,2);for(const s of sent){assert(s.body.includes(links[s.to]));assert(!s.options.bcc);const other=s.to==='one@example.com'?'two@example.com':'one@example.com';assert(!s.body.includes(links[other]));assert(!s.options.htmlBody.includes(links[other]));}
+ assert.equal(props.get('completedDate'),'2026-10-22');context.runGubaeReminders();assert.equal(sent.length,2);
+});

@@ -1,3 +1,4 @@
+import {accessForEmail,ensureRecipientAccess} from './access.mjs';
 import {runTeacherAssignmentFile} from './assign-teachers.mjs';
 import {ensureSignInDomain} from './auth-domain.mjs';
 import{readFile}from'node:fs/promises';
@@ -15,12 +16,13 @@ if(!publicAccess&&(!webConfig.apiKey||!webConfig.authDomain||webConfig.projectId
 const credentials=process.env.FIREBASE_SERVICE_ACCOUNT_JSON?cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)):applicationDefault();
 initializeApp({projectId,credential:credentials});const store=new FirestoreStore(getFirestore());
 await store.seed(JSON.parse(await readFile(new URL('../dist/meetings.json',import.meta.url),'utf8')));
+await ensureRecipientAccess(store);
 const assignmentResult=await runTeacherAssignmentFile(store,new URL('./data/teacher-assignments-2026-10.json',import.meta.url),{apply:true});
 console.log('Teacher assignment import: '+JSON.stringify(assignmentResult));
 const origins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
 const frontendUrl=process.env.FRONTEND_URL;if(!frontendUrl||!origins.includes(new URL(frontendUrl).origin))throw Error('Set FRONTEND_URL and include its origin in ALLOWED_ORIGINS.');
 let signInDomainReady=false;try{signInDomainReady=await ensureSignInDomain({projectId,frontendUrl,credentials});console.log('Google sign-in domain ready.');}catch{console.warn('Google sign-in domain check needs attention.');}
-const authorize=user=>{if(!user.email_verified||!admins.has(user.email?.toLowerCase()))throw Object.assign(Error('This Google account is not an administrator.'),{status:403});return user;};
+const authorize=user=>accessForEmail(store,user,admins);
 const app=createApp({createSessionCookie:token=>getAuth().createSessionCookie(token,{expiresIn:5*86400000}),verifySessionCookie:async cookie=>authorize(await getAuth().verifySessionCookie(cookie,true)),store,publicAccess,webConfig,signInDomainReady,origins,frontendUrl,verifyAdmin:async token=>{const user=await getAuth().verifyIdToken(token,true);return authorize(user);}});
 // Render terminates HTTPS at its proxy; trust exactly the immediate proxy.
 app.set('trust proxy',1);app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('Gubae API ready.'));

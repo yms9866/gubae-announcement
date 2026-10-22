@@ -2,7 +2,7 @@
 // Run installGubaeReminders once as jossimogs@gmail.com, then authorize Google.
 const GUBAE = Object.freeze({
   api: 'https://gubae-announcements-api.onrender.com/api/reminders/due',
-  page: 'https://gubae-announcements.vercel.app/due.html',
+  page: 'https://gubae-announcements.vercel.app/announcements.html',
   sender: 'jossimogs@gmail.com',
   zone: 'Asia/Dubai'
 });
@@ -52,10 +52,19 @@ function validateGubaeDue_(data, today) {
     else if (item.type === 'report') reports++;
     else throw new Error('Unknown announcement type; no email sent.');
   }
-  return { enabled: data.enabled, recipients, posters, invitations, reports, count: data.count };
+  const links = {};
+  for (const address of recipients) {
+    const link = data.recipientLinks && data.recipientLinks[address.toLowerCase()];
+    if (link === null) continue; // Access is blocked: do not email an unusable link.
+    if (typeof link !== 'string' || !/^https:\/\/gubae-announcements\.vercel\.app\/(?:announcements\.html#access=gsa_[A-Za-z0-9_-]{43}|login\.html\?[^<>"\s]+)$/.test(link)) {
+      throw new Error('Missing or invalid individual access link; no email sent. Update the backend and reminder script together.');
+    }
+    links[address] = link;
+  }
+  return { enabled: data.enabled, recipients: recipients.filter(address => links[address]), links, posters, invitations, reports, count: data.count };
 }
 
-function wasGubaeSent_(subject) {
+function wasGubaeSent_(subject, recipient) {
   const query = 'in:sent subject:"' + subject + '"';
   for (let start = 0; ; start += 50) {
     const threads = GmailApp.search(query, start, 50);
@@ -63,7 +72,7 @@ function wasGubaeSent_(subject) {
       for (const message of thread.getMessages()) {
         const from = message.getFrom();
         const address = (from.match(/<([^>]+)>/) || [null, from])[1].toLowerCase();
-        if (message.getSubject() === subject && address === GUBAE.sender && !message.isDraft()) return true;
+        if (message.getSubject() === subject && address === GUBAE.sender && !message.isDraft() && (!recipient || message.getTo().toLowerCase().split(/[,;]+/).some(to => to.trim() === recipient.toLowerCase() || to.includes('<' + recipient.toLowerCase() + '>')))) return true;
       }
     }
     if (threads.length < 50) return false;
@@ -86,7 +95,6 @@ function runGubaeReminders() {
     const complete = () => props.setProperty('completedDate', today);
     if (!due.enabled || !due.recipients.length || due.count === 0) { complete(); return; }
     const subject = 'Gubae announcements due · ' + today;
-    if (wasGubaeSent_(subject)) { complete(); return; }
     // Block automatic retries after an ambiguous send failure until reviewed.
     if (props.getProperty('attemptDate') === today) {
       throw new Error('A send was attempted today. Check Gmail Sent before clearing attemptDate in Script Properties.');
@@ -94,13 +102,18 @@ function runGubaeReminders() {
     if (MailApp.getRemainingDailyQuota() < due.recipients.length) throw new Error('Insufficient email quota; no email sent.');
     const summary = due.count + ' announcements pending: ' + due.posters + ' posters and ' + due.invitations + ' Zoom invitations and ' + due.reports + ' report links.';
     const steps = 'Open the page, prepare each announcement, send it in WhatsApp, and mark it sent so all helpers share the same status.';
-    const options = {
-      name: 'Gubae reminders',
-      htmlBody: '<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>Gubae announcements due</h2><p>' + today + '</p><p><strong>' + summary + '</strong></p><p><a style="display:inline-block;padding:14px 22px;background:#245c46;color:white;border-radius:8px;text-decoration:none" href="' + GUBAE.page + '">Open announcements due</a></p><p>' + steps + '</p></div>'
-    };
-    if (due.recipients.length > 1) options.bcc = due.recipients.slice(1).join(',');
     props.setProperty('attemptDate', today);
-    GmailApp.sendEmail(due.recipients[0], subject, summary + '\n\n' + GUBAE.page + '\n\n' + steps, options);
+    for (const recipient of due.recipients) {
+      if (wasGubaeSent_(subject, recipient)) continue;
+      const page = due.links[recipient];
+      const escapedPage = page.replace(/&/g, '&amp;');
+      const options = {
+        name: 'Gubae reminders',
+        htmlBody: '<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>Gubae announcements due</h2><p>' + today + '</p><p><strong>' + summary + '</strong></p><p><a style="display:inline-block;padding:14px 22px;background:#245c46;color:white;border-radius:8px;text-decoration:none" href="' + escapedPage + '">Open your announcements</a></p><p>' + steps + '</p><p>This is your private access link. Keep it private.</p></div>'
+      };
+      // Send separately so each recipient gets only their own link.
+      GmailApp.sendEmail(recipient, subject, summary + '\n\n' + page + '\n\n' + steps, options);
+    }
     complete();
     props.deleteProperty('attemptDate');
     console.log('Reminder sent: ' + today + '; announcements: ' + due.count);

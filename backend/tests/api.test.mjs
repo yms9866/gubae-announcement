@@ -82,7 +82,7 @@ test('shared reminder configuration validates recipients and revisions; due endp
  const saved=await api.put('/api/reminders/config').send({revision:0,enabled:true,recipients:['JossiMogs@gmail.com','jossimogs@gmail.com']});assert.equal(saved.status,200);assert.deepEqual(saved.body.recipients,['jossimogs@gmail.com']);
  assert.equal((await api.put('/api/reminders/config').send({revision:0,enabled:false,recipients:[]})).status,409);
  store.data.meetings.set('3',meeting('3','2026-10-17'));store.data.meetings.get('3').sent={poster:'done'};
- const due=await api.get('/api/reminders/due');assert.equal(due.status,200);assert.deepEqual(due.body.items.map(i=>i.key),['3:link']);assert.equal(due.body.enabled,true);assert.equal(due.body.dueUrl,'https://app.example.com/due.html');assert(!JSON.stringify(due.body).includes('+971'));
+ const due=await api.get('/api/reminders/due');assert.equal(due.status,200);assert.deepEqual(due.body.items.map(i=>i.key),['3:link']);assert.equal(due.body.enabled,true);assert.equal(due.body.dueUrl,'https://app.example.com/announcements.html');assert.match(due.body.recipientLinks['jossimogs@gmail.com'],/announcements.html#access=gsa_/);assert(!JSON.stringify(due.body).includes('+971'));
  assert.deepEqual((await api.get('/api/state')).body.reminderSettings.recipients,['jossimogs@gmail.com']);
 });
 

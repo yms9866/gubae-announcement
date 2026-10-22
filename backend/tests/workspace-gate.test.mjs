@@ -15,3 +15,15 @@ test('routing gate blocks workspace pages and assets but leaves only report depe
   assert.equal(valid.headers.get('x-middleware-next'),'1');
  }finally{globalThis.fetch=prior}
 });
+test('announcement links cannot load full workspace pages, JSON or poster assets',async()=>{
+ const prior=globalThis.fetch;
+ try{
+  globalThis.fetch=async()=>Response.json({authenticated:true,scope:'announcements'});
+  for(const path of ['/','/due.html','/teachers-day.html','/meetings.json','/posters/1.png','/app.mjs']){
+   const result=await proxy(new Request('https://app.example.com'+path,{headers:{cookie:'__Host-gubae_access=limited-test'}}));
+   assert.equal(result.status,303);assert.equal(result.headers.get('location'),'https://app.example.com/announcements.html');
+  }
+  globalThis.fetch=async()=>Response.json({authenticated:true,scope:'full'});
+  assert.equal((await proxy(new Request('https://app.example.com/',{headers:{cookie:'__Host-gubae_access=full-test'}}))).headers.get('x-middleware-next'),'1');
+ }finally{globalThis.fetch=prior}
+});

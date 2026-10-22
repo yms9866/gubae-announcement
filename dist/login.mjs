@@ -12,7 +12,7 @@ try{
   try{
    const response=await fetch('/api/browser-session',{method:'POST',headers:{Authorization:'Bearer '+await user.getIdToken(),'Content-Type':'application/json'},body:'{}'});
    const result=await response.json();if(!response.ok)throw Error(result.error||'This account does not have workspace access.');
-   location.replace(target);
+   location.replace(result.scope==='announcements'?'announcements.html':target);
   }catch(error){blockedUser=user.uid;status.textContent=error.message;switcher.hidden=false;button.disabled=false;}
   finally{busy=false;}
  });
