@@ -27,5 +27,27 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "report"
+        }
+      ],
+      "destination": "/report.html"
+    },
+    {
+      "source": "/index.html",
+      "has": [
+        {
+          "type": "query",
+          "key": "report"
+        }
+      ],
+      "destination": "/report.html"
+    }
   ]
 }
