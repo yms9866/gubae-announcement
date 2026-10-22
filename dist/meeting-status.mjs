@@ -6,4 +6,11 @@ export function meetingStatus(meeting,report,now=new Date()){
  const end=start+(meeting.durationMinutes||90)*60000;
  return now.getTime()>=end?'overdue':'upcoming';
 }
-export const meetingStatusLabel=status=>({held:'Held',upcoming:'Upcoming',overdue:'Overdue',missed:'Missed / not held',cancelled:'Cancelled',postponed:'Postponed'}[status]||'Unknown');
+// The meetings list highlights the gubae day from 06:00 Dubai until its scheduled end.
+export function meetingListStatus(meeting,report,now=new Date()){
+ const outcome=meetingStatus(meeting,report,now);
+ if(outcome!=='upcoming')return outcome;
+ const morning=new Date(meeting.date+'T06:00:00+04:00').getTime();
+ return now.getTime()>=morning?'today':'upcoming';
+}
+export const meetingStatusLabel=status=>({held:'Held',today:'Today',upcoming:'Upcoming',overdue:'Overdue',missed:'Missed / not held',cancelled:'Cancelled',postponed:'Postponed'}[status]||'Unknown');

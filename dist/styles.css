@@ -20,3 +20,10 @@
 /* The shared sending page deliberately contains only pending announcements. */
 .due-only .sidebar,.due-only header,.due-only .intro,.due-only #stats,.due-only footer,.due-only .sync-bar,.due-only .program-bar,.due-only #editFromDetail,.due-only #dialogTag{display:none!important}
 .due-only .app{display:block}.due-only main{margin:0!important;padding:20px!important;max-width:760px;margin-inline:auto!important;width:100%;box-sizing:border-box}.due-card{background:white;border:1px solid #ddd;border-radius:14px;padding:22px;margin-bottom:16px}.due-card h2{font-size:20px;line-height:1.6;margin:0}.due-card p{color:#647269}.due-only #content{min-height:60vh}
+
+/* Clear status tabs for the meeting list. */
+.meeting-filters{gap:8px;padding-bottom:0}
+.meeting-filters .chip{border:1px solid var(--border);border-bottom:3px solid transparent;border-radius:7px 7px 0 0;padding:12px 16px;margin-bottom:0;font-size:12px;color:#52664c}
+.meeting-filters .chip.selected{border-bottom-color:var(--green);background:#eaf0e3;color:var(--green)}
+.meeting-status.today{background:#fff0c9;border-color:#e5c272;color:#795615;font-weight:600}
+@media(max-width:600px){.meeting-filters{gap:5px}.meeting-filters .chip{padding:10px;font-size:11px}}
