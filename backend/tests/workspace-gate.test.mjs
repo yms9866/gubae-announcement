@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import proxy from '../../proxy.mjs';
+import proxy from '../../proxy.js';
 test('routing gate blocks workspace pages and assets but leaves only report dependencies public',async()=>{
  const prior=globalThis.fetch;globalThis.fetch=async()=>new Response('{}',{status:401});
  try{
