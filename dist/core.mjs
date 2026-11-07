@@ -1,0 +1,23 @@
+import {DEFAULT_TIMING,ANNOUNCEMENT_KINDS,announcementDeadline} from './announcement-timing.mjs';
+export const shiftDate=(iso,days)=>{const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};
+export const dubaiDate=(now=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Dubai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+export const prettyDate=(iso)=>new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(new Date(iso+'T12:00:00Z'));
+export const meetingId=m=>new URL(m.link).pathname.split('/').pop().replace(/^(\d{3})(\d{4})(\d{4})$/,'$1 $2 $3');
+export const timeLabel=(time='21:00')=>{const [h,min]=time.split(':').map(Number);return `${String(h%12||12).padStart(2,'0')}:${String(min).padStart(2,'0')} ${h>=12?'PM':'AM'}`};
+export const timeRange=m=>{const start=m.startTime||'21:00';const [h,min]=start.split(':').map(Number);const end=h*60+min+(m.durationMinutes||90);return `${timeLabel(start)}–${timeLabel(`${String(Math.floor(end/60)%24).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`)}${end>=1440?' (+1 day)':''}`};
+export const message=m=>{if(!m.link)throw Error('Add this gubae’s Zoom link before sending an invitation.');return `Topic: ${m.topic}\nTime: ${prettyDate(m.date)} ${timeLabel(m.startTime)} Dubai\n\nJoin Zoom Meeting\n${m.link}\n\nMeeting ID: ${meetingId(m)}`};
+export const normalizeMeetingEdit=(base,input)=>{const topic=String(input.topic??base.topic).trim();if(!topic||topic.length>300)throw Error('Enter a topic between 1 and 300 characters.');const date=String(input.date??base.date);const d=new Date(date+'T12:00:00Z');if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(d)||d.toISOString().slice(0,10)!==date)throw Error('Choose a valid meeting date.');const startTime=String(input.startTime??base.startTime??'21:00');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime))throw Error('Choose a valid start time.');const durationMinutes=Number(input.durationMinutes??base.durationMinutes??90);if(!Number.isInteger(durationMinutes)||durationMinutes<1||durationMinutes>1440)throw Error('Duration must be between 1 and 1440 minutes.');const link=String(input.link??base.link??'').trim();if(!link&&base.linkPending===true)return{topic,date,startTime,durationMinutes,link:'',linkPending:true};let url;try{url=new URL(link)}catch{throw Error('Enter a valid Zoom meeting link.')}if(url.protocol!=='https:'||url.username||url.password||url.port||!(url.hostname==='zoom.us'||url.hostname.endsWith('.zoom.us'))||!/^\/j\/\d{9,11}\/?$/.test(url.pathname))throw Error('Use an HTTPS Zoom link containing /j/ and the meeting ID.');return{topic,date,startTime,durationMinutes,link:url.href,...(base.linkPending!==undefined?{linkPending:false}:{})}};
+export const applyMeetingEdits=(bases,edits={})=>bases.map(m=>({...m,...normalizeMeetingEdit(m,edits[m.id]||{})}));
+export const phoneDigits=value=>{const s=value.trim().replace(/[\s()\-]/g,'');if(!/^\+?[1-9]\d{6,14}$/.test(s))return null;const p=s.replace(/^\+/,'');if(p.startsWith('971')&&p.length!==12)return null;if(p.startsWith('251')&&p.length!==12)return null;return p};
+export const phoneList=value=>value.split('/').map(p=>p.trim()).filter(Boolean);
+export const validPhoneList=value=>phoneList(value).length>0&&phoneList(value).every(p=>phoneDigits(p));
+export const waUrl=(phone,text)=>{const p=phoneDigits(phone);if(!p)throw new Error('Enter an international phone number with country code.');return 'https://wa.me/'+p+'?text='+encodeURIComponent(text)};
+export const tasksFor=(meetings,timing=DEFAULT_TIMING)=>meetings.flatMap(m=>ANNOUNCEMENT_KINDS.map(type=>{const dueAt=announcementDeadline(m,type,timing);return{meeting:m,type,key:m.id+':'+type,dueAt,due:dubaiDate(new Date(dueAt))}})).sort((a,b)=>a.dueAt.localeCompare(b.dueAt)||String(a.meeting.id).localeCompare(String(b.meeting.id))||a.type.localeCompare(b.type));
+export const statusOf=(task,sent,dateOrNow=new Date())=>{
+ if(sent[task.key]||task.meeting.sent?.[task.type])return 'sent';
+ const precise=dateOrNow instanceof Date,now=precise?dateOrNow:new Date(dateOrNow+'T23:59:59+04:00'),today=precise?dubaiDate(now):dateOrNow;
+ const start=new Date(task.meeting.date+'T'+(task.meeting.startTime||'21:00')+':00+04:00'),end=start.getTime()+(task.meeting.durationMinutes||90)*60000;
+ if(now.getTime()>=end)return 'past';
+ if(task.dueAt&&new Date(task.dueAt)>now)return 'upcoming';
+ return task.due<today?'overdue':task.due===today?'today':'upcoming';
+};
