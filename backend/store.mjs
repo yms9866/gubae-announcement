@@ -11,7 +11,7 @@ const envMs=(name,fallback)=>{const v=Number(process.env[name]);return Number.is
 // Shared per-process cache. Every write bumps gubae_meta/state.version inside its transaction,
 // so an expired entry is revalidated by reading that single document instead of the collection.
 export class FirestoreStore{
-  constructor(db,{cacheTtlMs=envMs('FIRESTORE_CACHE_TTL_MS',45000),cacheMaxAgeMs=envMs('FIRESTORE_CACHE_MAX_AGE_MS',600000),quotaCooldownMs=envMs('FIRESTORE_QUOTA_COOLDOWN_MS',300000),retries=2,now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),logger=console}={}){
+    constructor(db,{cacheTtlMs=envMs('FIRESTORE_CACHE_TTL_MS',45000),cacheMaxAgeMs=envMs('FIRESTORE_CACHE_MAX_AGE_MS',21600000),quotaCooldownMs=envMs('FIRESTORE_QUOTA_COOLDOWN_MS',300000),retries=2,now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),logger=console}={}){
     this.db=db;this.meta=db.doc('gubae_meta/state');
     Object.assign(this,{ttl:cacheTtlMs,maxAge:cacheMaxAgeMs,quotaCooldownMs,retries,now,sleep,logger});
     this.entries=new Map();this.inflight=new Map();this.generations=new Map();this.blockedUntil=0;

@@ -21,7 +21,8 @@ test('concurrent reads share one Firestore query and later reads use the cache',
  results[0][0].topic='mutated by caller';assert.equal((await store.list('meetings'))[0].topic,'A');
  assert.equal((await store.get('meetings','b')).topic,'B');assert.equal(stats.queries,1);
  const before=stats.reads;c.advance(50000);await store.list('meetings');assert.equal(stats.queries,1,'expired entry is revalidated with the version document');assert.equal(stats.reads,before+1);
- c.advance(700000);await store.list('meetings');assert.equal(stats.queries,2,'max age forces a full refresh');
+  c.advance(3600000);await store.list('meetings');assert.equal(stats.queries,1,'an unchanged version keeps the cache valid for hours');
+ c.advance(21600000);await store.list('meetings');assert.equal(stats.queries,2,'max age forces a full refresh');
 });
 test('writes update cached collections without rereading and never keep stale data',async()=>{
  const {db,stats,data}=database(),c=clock(),store=new FirestoreStore(db,{now:c.now});
