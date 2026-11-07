@@ -2,7 +2,8 @@ import {teacherDays} from './teacher-days.mjs';
 import {prettyDate,timeRange,phoneList,phoneDigits,message,waUrl} from './core.mjs';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const root=document.querySelector('#teacherDays'),status=document.querySelector('#dayStatus'),button=document.querySelector('#refreshDays');
-let snapshot=null,busy=false,saving=false,limited=false,teacherTab='unsent';
+let snapshot=null,busy=false,saving=false,limited=false,teacherTab='unsent',source=null,etag='',lastRefresh=0,pausedUntil=0,configCheck=null;
+const REFRESH_MS=240000,RESUME_AFTER_MS=60000,BUSY_PAUSE_MS=300000;
 const composer=document.querySelector('#teacherComposer'),form=document.querySelector('#teacherMessageForm'),text=document.querySelector('#teacherMessage'),phone=document.querySelector('#teacherPhone'),composeError=document.querySelector('#composeError');
 let composing=null;
 function updateSend(){document.querySelector('#openTeacherWhatsApp').disabled=!text.value.trim()||!phoneDigits(phone.value);}
@@ -40,19 +41,21 @@ function draw(){
 async function refresh(){
  if(busy||saving)return;busy=true;button.disabled=true;status.className='';status.textContent=snapshot?'Refreshing the shared schedule…':'Loading the shared schedule…';
  try{
-  const configResponse=await fetch('./cloud-config.json',{cache:'no-store'});if(!configResponse.ok)throw Error('Connection settings could not load.');
-  const config=await configResponse.json(),api=new URL(config.apiBase);
-  if(api.protocol!=='https:')throw Error('The backend address must use HTTPS.');
-  let response=await fetch('/api/teachers-day',{cache:'no-store',signal:AbortSignal.timeout(90000)});limited=response.ok;if(!response.ok)response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(90000)});
-  if(!response.ok){if([401,403].includes(response.status)){snapshot=null;root.innerHTML='';}throw Error('Open your private teacher reminder link, or sign in with an authorized account.');}
+  configCheck??=(async()=>{const configResponse=await fetch('./cloud-config.json',{cache:'no-store'});if(!configResponse.ok)throw Error('Connection settings could not load.');const config=await configResponse.json(),api=new URL(config.apiBase);if(api.protocol!=='https:')throw Error('The backend address must use HTTPS.');})().catch(e=>{configCheck=null;throw e});await configCheck;
+  const loadState=()=>fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(90000),headers:etag&&snapshot?{'If-None-Match':etag}:{}});
+  let response,teacherView=source!=='state';if(!teacherView)response=await loadState();else{response=await fetch('/api/teachers-day',{cache:'no-store',signal:AbortSignal.timeout(90000)});if(!response.ok&&source!=='teacher'&&[401,403].includes(response.status)){teacherView=false;response=await loadState();}}
+  if(response.status===304){lastRefresh=Date.now();status.textContent='Shared schedule updated · Dubai time';return;}
+  if(!response.ok){if([429,503].includes(response.status)){pausedUntil=Date.now()+Math.max(BUSY_PAUSE_MS,(Number(response.headers?.get?.('Retry-After'))||0)*1000);let body;try{body=await response.json()}catch{}throw Error(body?.error||'The database is busy. Try again later.');}if([401,403].includes(response.status)){snapshot=null;source=null;etag='';root.innerHTML='';}throw Error('Open your private teacher reminder link, or sign in with an authorized account.');}
   const data=await response.json();if(!Array.isArray(data.meetings)||!Array.isArray(data.teachers))throw Error('The schedule response was incomplete.');
+  limited=teacherView;source=limited?'teacher':'state';etag=limited?'':response.headers?.get?.('ETag')||'';lastRefresh=Date.now();pausedUntil=0;
   snapshot=data;const workspaceLink=document.querySelector('.day-top a');if(workspaceLink)workspaceLink.hidden=limited;draw();status.textContent='Shared schedule updated · Dubai time';
  }catch(e){status.className='error';status.textContent=(snapshot?'Showing the last loaded schedule. ':'')+(e.message||'Could not connect. Please retry.');}
  finally{busy=false;button.disabled=false;}
 }
 document.querySelectorAll('[data-teacher-tab]').forEach(tab=>tab.onclick=()=>{if(saving)return;teacherTab=tab.dataset.teacherTab;draw()});
-button.onclick=refresh;
-setInterval(()=>{if(saving)return;draw();if(!document.hidden)refresh()},60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw();refresh()}});
+button.onclick=()=>refresh();
+const autoRefresh=minAge=>{if(!document.hidden&&Date.now()>=pausedUntil&&Date.now()-lastRefresh>=minAge)refresh()};
+setInterval(()=>{if(saving)return;draw();autoRefresh(REFRESH_MS-5000)},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw();autoRefresh(RESUME_AFTER_MS)}});
 const teacherToken=new URLSearchParams(location.hash?.slice(1)||'').get('teacherAccess');
 if(teacherToken){const response=await fetch('/api/teachers-day/session',{method:'POST',headers:{Authorization:'Bearer '+teacherToken},cache:'no-store'});history.replaceState(null,'',location.pathname);if(!response.ok){status.className='error';status.textContent='This teacher reminder link is unavailable. Ask the organizer for a new link.';}else await refresh();}else await refresh();

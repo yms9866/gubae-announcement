@@ -13,16 +13,24 @@ function verifyGubaeAccount_() {
   }
 }
 
+// One API call per trigger run; both reminder lists share the response.
+let gubaeDueResponse_ = null;
 function fetchGubaeDue_() {
+  if (gubaeDueResponse_) return gubaeDueResponse_;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = UrlFetchApp.fetch(GUBAE.api, {
         method: 'get', muteHttpExceptions: true, followRedirects: false,
         headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Authorization: 'Bearer ' + PropertiesService.getScriptProperties().getProperty('GUBAE_API_TOKEN') }
       });
-      if (response.getResponseCode() !== 200) throw new Error('API HTTP ' + response.getResponseCode());
-      return JSON.parse(response.getContentText());
+      const code = response.getResponseCode();
+      // The database limit resets daily; retrying immediately only spends more reads.
+      if (code === 429 || code === 503) throw Object.assign(new Error('Reminder API busy (HTTP ' + code + '); no email sent. The next scheduled run will retry.'), { noRetry: true });
+      if (code !== 200) throw new Error('API HTTP ' + code);
+      gubaeDueResponse_ = JSON.parse(response.getContentText());
+      return gubaeDueResponse_;
     } catch (error) {
+      if (error.noRetry) throw error;
       if (attempt === 1) throw new Error('Live reminder API unavailable; no email sent.');
       Utilities.sleep(15000);
     }
@@ -122,6 +130,7 @@ function runGubaeAnnouncementReminders_() {
 
 // Both reminder lists share the existing trigger and private API key.
 function runGubaeReminders() {
+  gubaeDueResponse_ = null;
   const failures = [];
   try { runGubaeAnnouncementReminders_(); } catch (error) { failures.push('Announcement reminders: ' + error.message); }
   try { runGubaeTeacherReminders_(); } catch (error) { failures.push('Teacher reminders: ' + error.message); }
