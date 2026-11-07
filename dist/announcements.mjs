@@ -1,8 +1,9 @@
 import {message,prettyDate,phoneList,waUrl} from './core.mjs';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let items=[],kind='all',selected=null,posterUrl=null,posterBlob=null,activeKey='',generation=0;
+let items=[],kind='all',selected=null,posterUrl=null,posterBlob=null,activeKey='',generation=0,loading=null,lastLoad=0,pausedUntil=0;
+const REFRESH_MS=240000,RESUME_AFTER_MS=60000,BUSY_PAUSE_MS=300000;
 const labels={poster:'Poster',link:'Zoom link',report:'Report link'};
-async function api(path,method='GET',body){const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});if(!r.ok){let data;try{data=await r.json()}catch{}throw Error(data?.error||'Could not load announcements.')}return r.status===204?null:r.json()}
+async function api(path,method='GET',body){const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});if(!r.ok){let data;try{data=await r.json()}catch{}throw Object.assign(Error(data?.error||'Could not load announcements.'),{status:r.status,retryAfter:Number(r.headers?.get?.('Retry-After'))||0})}return r.status===204?null:r.json()}
 function render(){
  $('#announcementTabs').hidden=false;$('#announcementTabs').innerHTML=['all','link','poster','report'].map(k=>`<button class="secondary" data-kind="${k}" aria-pressed="${kind===k}">${k==='all'?'All':labels[k]} · ${items.filter(i=>k==='all'||i.type===k).length}</button>`).join('');
  $('#announcementTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{kind=b.dataset.kind;render()});
@@ -10,7 +11,8 @@ function render(){
  $('#announcementList').innerHTML=visible.map((i,index)=>`<article class="announcement-card"><div><div class="eyebrow">${labels[i.type]}</div><h2 lang="am">${esc(i.meeting.topic)}</h2><p>${prettyDate(i.meeting.date)} · Dubai</p><p>WhatsApp: ${esc(phoneList(i.meeting.recipient||'').join(' / ')||'No recipient number saved.')}</p></div><button class="primary" data-open="${index}">Prepare ${labels[i.type].toLowerCase()} ↗</button></article>`).join('')||'<div class="setup"><h2>All caught up.</h2><p>No announcements are due in this tab.</p></div>';
  $('#announcementList').querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openAnnouncement(visible[Number(b.dataset.open)]));
 }
-async function load(){const data=await api('/announcements');items=data.items;$('#accessStatus').textContent=items.length+' announcements due · '+data.email;$('#fullWorkspace').hidden=data.scope!=='full';$('#leave').hidden=false;$('#accessActions').innerHTML='';render()}
+function load(){if(loading)return loading;loading=(async()=>{try{const data=await api('/announcements');items=data.items;lastLoad=Date.now();pausedUntil=0;$('#accessStatus').textContent=items.length+' announcements due · '+data.email;$('#fullWorkspace').hidden=data.scope!=='full';$('#leave').hidden=false;$('#accessActions').innerHTML='';render()}catch(e){if([429,503].includes(e.status))pausedUntil=Date.now()+Math.max(BUSY_PAUSE_MS,e.retryAfter*1000);throw e}finally{loading=null}})();return loading}
+function autoRefresh(minAge){if(document.hidden||$('#announcementDialog').open||Date.now()<pausedUntil||Date.now()-lastLoad<minAge)return;load().catch(e=>{$('#accessStatus').textContent=e.message;if(![429,503].includes(e.status)){$('#announcementList').innerHTML='';$('#announcementTabs').hidden=true}})}
 function clearPoster(){if(posterUrl)URL.revokeObjectURL(posterUrl);posterUrl=null;posterBlob=null;}
 async function openAnnouncement(item){
  const ticket=++generation;selected=item;activeKey=item.key;clearPoster();const m=item.meeting,dialog=$('#announcementDialog');$('#announcementHeading').textContent=labels[item.type];$('#announcementBody').textContent='Preparing…';dialog.showModal();
@@ -38,4 +40,5 @@ try{
  if(token){const r=await fetch('/api/access/session',{method:'POST',headers:{Authorization:'Bearer '+token},cache:'no-store'});history.replaceState(null,'',location.pathname);if(!r.ok)throw Error('This private link is unavailable or has been revoked. Ask the organizer for a new one.');const session=await r.json();if(session.scope==='full'){location.replace('./');}else await load();}
  else await load();
 }catch(error){$('#accessStatus').textContent=error.message;$('#accessActions').innerHTML='<p>Open the private link sent to you. If your access uses a Google account, use the button below.</p><a class="secondary" href="login.html?next=%2Fannouncements.html">Google sign-in</a>';}
-setInterval(()=>{if(!document.hidden&&!$('#announcementDialog').open)load().catch(e=>{$('#accessStatus').textContent=e.message;$('#announcementList').innerHTML='';$('#announcementTabs').hidden=true})},60000);
+setInterval(()=>autoRefresh(REFRESH_MS-5000),REFRESH_MS);
+document.addEventListener('visibilitychange',()=>autoRefresh(RESUME_AFTER_MS));
